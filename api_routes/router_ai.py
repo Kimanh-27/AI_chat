@@ -4,7 +4,9 @@ import base64
 import uuid
 import re
 import asyncio
+import os
 
+from dotenv import load_dotenv
 from typing import List
 from database import get_db_connection
 from schemas import QuestionRequest, ExamRequest, PracticeQuestion, UpdateQuestionModel
@@ -12,7 +14,7 @@ from prompts import TOEIC_CONFIG
 
 # --- THƯ VIỆN AI ---
 import google.generativeai as genai
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
@@ -38,7 +40,13 @@ router = APIRouter()
 
 uploaded_docs_cache = {} 
 global_vectorstore = None
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+#embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+embeddings = GoogleGenerativeAIEmbeddings(
+    model="models/embedding-001",
+    google_api_key=GOOGLE_API_KEY
+)
 nova_tasks = {}
 
 @router.post("/generate_toeic")

@@ -19,8 +19,12 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 
-GOOGLE_API_KEY = "AIzaSyCgzKYBUfG0Vky_iZ5FUWpgzFc74SsOALA"
+load_dotenv()
+
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
 genai.configure(api_key=GOOGLE_API_KEY)
+
 
 llm = ChatOpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/",

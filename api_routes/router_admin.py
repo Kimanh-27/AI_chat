@@ -7,12 +7,11 @@ import random
 import os
 from datetime import datetime
 from schemas import UpdateAnswersModel, AccountModel, ClassModel, UpdateProfileModel
-import bcrypt  # ĐÃ THAY HASHLIB BẰNG BCRYPT
+import bcrypt  
 from typing import Optional
 
 router = APIRouter()
 
-# Hàm hỗ trợ băm mật khẩu dùng chung cho toàn file
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
     return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
@@ -264,7 +263,6 @@ async def add_account(acc: AccountModel):
             if not acc.mat_khau or acc.mat_khau.strip() == "":
                 acc.mat_khau = "123456"
                 
-        # NÂNG CẤP BCRYPT
         hashed_password = hash_password(acc.mat_khau)
         
         sql = "INSERT INTO tai_khoan (ten_dang_nhap, email, mat_khau, vai_tro) VALUES (%s, %s, %s, %s)"
@@ -298,7 +296,6 @@ async def update_account(acc_id: int, acc: AccountModel):
         cursor.execute("UPDATE tai_khoan SET email = %s WHERE id = %s", (acc.email, acc_id))
         
         if acc.mat_khau and acc.mat_khau.strip() != "":
-            # NÂNG CẤP BCRYPT
             hashed_password = hash_password(acc.mat_khau)
             cursor.execute("UPDATE tai_khoan SET mat_khau = %s WHERE id = %s", (hashed_password, acc_id))
         
@@ -363,7 +360,6 @@ async def reset_password(acc_id: int):
         
         # Mật khẩu mặc định
         default_pass = "123456"
-        # NÂNG CẤP BCRYPT
         hashed_password = hash_password(default_pass)
         
         cursor.execute("UPDATE tai_khoan SET mat_khau = %s WHERE id = %s", (hashed_password, acc_id))

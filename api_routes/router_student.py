@@ -1,0 +1,407 @@
+from fastapi import APIRouter
+from database import get_db_connection
+from schemas import HistoryData, IIGSubmitData
+import json
+
+router = APIRouter()
+
+
+#=============================================================
+#===      HỌC SINH NHẬN BÀI TẬP ĐƯỢC GIAO     ================
+#=============================================================
+# 1. API Lấy danh sách bài tập dựa theo ID Lớp của Học sinh
+@router.get("/get-homeworks/{id_hoc_sinh}/{id_lop}")
+async def get_student_homeworks(id_hoc_sinh: int, id_lop: int):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # Chỉ lấy bài giao chung cho cả lớp (id_hoc_sinh = NULL/0) HOẶC giao đích danh cho em này
+        sql = """
+            SELECT b.*, 
+                   (SELECT COUNT(*) FROM lich_su_lam_bai l 
+                    WHERE l.id_bai_tap = b.id AND l.id_hoc_sinh = %s) as da_lam
+            FROM bai_tap_giao b
+            WHERE b.id_lop = %s AND (b.id_hoc_sinh IS NULL OR b.id_hoc_sinh = 0 OR b.id_hoc_sinh = %s)
+            ORDER BY b.han_nop ASC
+        """
+        
+        cursor.execute(sql, (id_hoc_sinh, id_lop, id_hoc_sinh))
+        homeworks = cursor.fetchall()
+        
+        conn.close()
+        return {"status": "success", "data": homeworks}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/get-homework-detail/{id_bai_tap}")
+async def get_homework_detail(id_bai_tap: int):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # 1. Lấy thông tin bài tập
+        cursor.execute("SELECT * FROM bai_tap_giao WHERE id = %s", (id_bai_tap,))
+        hw = cursor.fetchone()
+        
+        if not hw:
+            return {"status": "error", "message": "Không tìm thấy bài tập!"}
+            
+        # 2. Lấy danh sách ID câu hỏi từ CSDL
+        ids = json.loads(hw['danh_sach_cau_hoi'])
+        
+        if not ids:
+            return {"status": "success", "homework": hw, "questions": []}
+            
+        # 3. Lấy đúng các câu hỏi đó ra
+        format_strings = ','.join(['%s'] * len(ids))
+        
+        cursor.execute(f"SELECT * FROM ngan_hang_cau_hoi WHERE id IN ({format_strings})", tuple(ids))
+        questions = cursor.fetchall()
+        
+        conn.close()
+        return {"status": "success", "homework": hw, "questions": questions}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+#====LƯU LỊCH SỬ LÀM BAI CỦA HỌC SINH====
+@router.post("/save-history")
+async def save_history(data: HistoryData):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # 1. Đọc chi tiết từng câu hỏi học sinh vừa nộp
+        chi_tiet = json.loads(data.chi_tiet_bai_lam)
+        
+        # Cái giỏ để phân loại điểm số. Ví dụ: {'part_3': {'diem': 2, 'tong': 3, 'chi_tiet': [...]}}
+        part_stats = {}
+
+        for item in chi_tiet:
+            # 2. Lục DB xem câu hỏi này thực chất thuộc Part nào
+            cursor.execute("SELECT part FROM ngan_hang_cau_hoi WHERE id = %s", (item['id_cau_hoi'],))
+            q_info = cursor.fetchone()
+            
+            # Nếu tìm thấy thì lấy part chuẩn, không thì lấy part mặc định gửi lên
+            actual_part = q_info['part'] if q_info else data.part 
+
+            # Nếu cái rổ cho Part này chưa có, thì tạo mới
+            if actual_part not in part_stats:
+                part_stats[actual_part] = {'diem': 0, 'tong': 0, 'chi_tiet': []}
+            
+            # 3. Chấm điểm rớt vào đúng rổ của Part đó
+            part_stats[actual_part]['tong'] += 1
+            if item.get('is_correct'):
+                part_stats[actual_part]['diem'] += 1
+            part_stats[actual_part]['chi_tiet'].append(item)
+
+        # 4. Lưu vào Database thành NHIỀU DÒNG (Mỗi Part 1 dòng)
+        sql_insert = "INSERT INTO lich_su_lam_bai (id_hoc_sinh, part, diem_so, tong_so_cau, chi_tiet_bai_lam, id_bai_tap) VALUES (%s, %s, %s, %s, %s, %s)"
+        
+        for p, stats in part_stats.items():
+            # Chỉ lưu những Part thực sự có câu hỏi trong bài làm
+            if stats['tong'] > 0:
+                chi_tiet_json = json.dumps(stats['chi_tiet'])
+                cursor.execute(sql_insert, (data.id_hoc_sinh, p, stats['diem'], stats['tong'], chi_tiet_json, data.id_bai_tap))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return {"status": "success"}
+        
+    except Exception as e:
+        print("Lỗi lưu lịch sử:", e)
+        return {"status": "error", "message": str(e)}
+
+
+#====  LẤY RA LỊCH SỬ LÀM BÀI  ====
+@router.get("/get-history/{part}/{id_hoc_sinh}")
+async def get_history(part: str, id_hoc_sinh: int):
+    try:
+        conn = get_db_connection()
+        # Sử dụng dictionary=True (nếu dùng mysql-connector) hoặc pymysql.cursors.DictCursor để trả về dạng JSON dễ đọc
+        cursor = conn.cursor(dictionary=True) 
+        
+        # Truy vấn lấy lịch sử, sắp xếp ngày làm bài MỚI NHẤT lên đầu
+        sql = """
+            SELECT id, diem_so, tong_so_cau, thoi_gian_nop, chi_tiet_bai_lam 
+            FROM lich_su_lam_bai 
+            WHERE part = %s AND id_hoc_sinh = %s 
+            ORDER BY thoi_gian_nop DESC
+        """
+        cursor.execute(sql, (part, id_hoc_sinh))
+        records = cursor.fetchall()
+        
+        # Chuyển đổi chuỗi JSON trong CSDL thành mảng Python trước khi trả về
+        for row in records:
+            if row['chi_tiet_bai_lam']:
+                row['chi_tiet_bai_lam'] = json.loads(row['chi_tiet_bai_lam'])
+                
+        conn.close()
+        return {"status": "success", "data": records}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+#=============================================================
+#===           HỌC SINH THỐNG KÊ PHÂN TÍCH          ==========
+#=============================================================
+@router.get("/get-statistics/{id_hoc_sinh}")
+async def get_statistics(id_hoc_sinh: int):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # 1. Thống kê theo từng Part (Gom nhóm để xem tỷ lệ đúng/sai)
+        sql_part = """
+            SELECT part, 
+                   SUM(diem_so) as total_correct, 
+                   SUM(tong_so_cau) as total_questions 
+            FROM lich_su_lam_bai 
+            WHERE id_hoc_sinh = %s 
+            GROUP BY part
+            ORDER BY part ASC
+        """
+        cursor.execute(sql_part, (id_hoc_sinh,))
+        part_stats = cursor.fetchall()
+
+        # 2. Thống kê tổng quan toàn bộ quá trình học
+        sql_total = """
+            SELECT COUNT(*) as total_tests, 
+                   SUM(diem_so) as total_correct, 
+                   SUM(tong_so_cau) as total_questions
+            FROM lich_su_lam_bai
+            WHERE id_hoc_sinh = %s
+        """
+        cursor.execute(sql_total, (id_hoc_sinh,))
+        total_stats = cursor.fetchone()
+
+        conn.close()
+        return {
+            "status": "success", 
+            "part_stats": part_stats, 
+            "total_stats": total_stats
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ==============================
+# HỌC SINH LẤY CÂU HỎI ÔN LUYỆN
+# ==============================
+@router.get("/get-practice-questions/{part_name}/{id_hoc_sinh}")
+async def get_student_practice_questions(part_name: str, id_hoc_sinh: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        # 1. Truy ngược xem học sinh này đang học lớp nào, do giáo viên nào dạy
+        cursor.execute("""
+            SELECT l.id_giao_vien 
+            FROM hoc_sinh h 
+            JOIN lop_hoc l ON h.id_lop = l.id 
+            WHERE h.id_tai_khoan = %s
+        """, (id_hoc_sinh,))
+        gv_info = cursor.fetchone()
+        
+        if not gv_info:
+            db.close()
+            return {"status": "success", "data": []} # Học sinh chưa có lớp -> Trống
+            
+        id_giao_vien = gv_info['id_giao_vien']
+        
+        # 2. Lấy đúng câu hỏi do giáo viên đó biên soạn
+        sql = "SELECT * FROM ngan_hang_cau_hoi WHERE part = %s AND id_giao_vien = %s ORDER BY id DESC"
+        cursor.execute(sql, (part_name, id_giao_vien))
+        questions = cursor.fetchall()
+        
+        cursor.close()
+        db.close()
+        
+        return {"status": "success", "data": questions}
+    except Exception as e:
+        print(f"Lỗi lấy dữ liệu ôn luyện của học sinh: {e}")
+        return {"status": "error", "message": "Không thể kết nối Database."}
+
+# ==========================================
+# HỌC SINH LẤY ĐỀ THI IIG (BẢO MẬT: KHÔNG TRẢ VỀ ĐÁP ÁN)
+# ==========================================
+@router.get("/get-iig-test/{id_de_thi}")
+async def get_student_iig_test(id_de_thi: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        # CHỈ SELECT các cột an toàn, TUYỆT ĐỐI KHÔNG SELECT dap_an_json
+        sql = "SELECT id, ten_de, file_pdf, file_audio FROM de_thi_iig WHERE id = %s"
+        cursor.execute(sql, (id_de_thi,))
+        test = cursor.fetchone()
+        
+        cursor.close()
+        db.close()
+        
+        if not test:
+            return {"status": "error", "message": "Không tìm thấy đề thi."}
+            
+        return {"status": "success", "data": test}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/submit-iig-test")
+async def submit_iig_test(data: IIGSubmitData):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        # 1. Lấy đáp án gốc từ Database
+        cursor.execute("SELECT dap_an_json FROM de_thi_iig WHERE id = %s", (data.id_de_thi,))
+        de_thi = cursor.fetchone()
+        
+        if not de_thi:
+            return {"status": "error", "message": "Không tìm thấy đề thi gốc để chấm điểm."}
+            
+        dap_an_chuan = json.loads(de_thi['dap_an_json'])
+        dap_an_hoc_sinh = data.dap_an_hoc_sinh
+        
+        # 2. Logic chấm điểm
+        so_cau_nghe = 0
+        so_cau_doc = 0
+        chi_tiet_bai_lam = []
+        
+        for i in range(200):
+            cau_so = i + 1
+            chon = dap_an_hoc_sinh[i] if i < len(dap_an_hoc_sinh) else ""
+            chuan = dap_an_chuan[i] if i < len(dap_an_chuan) else ""
+            is_correct = (chon == chuan and chon != "")
+            
+            if is_correct:
+                if i < 100: so_cau_nghe += 1
+                else: so_cau_doc += 1
+                
+            # Lưu lại chi tiết
+            chi_tiet_bai_lam.append({
+                "cau_so": cau_so,
+                "da_chon": chon,
+                "dap_an_dung": chuan,
+                "is_correct": is_correct
+            })
+            
+        # 3. Quy đổi điểm TOEIC
+        diem_nghe = min(so_cau_nghe * 5, 495) if so_cau_nghe > 0 else 5
+        diem_doc = min(so_cau_doc * 5, 495) if so_cau_doc > 0 else 5
+        tong_diem = diem_nghe + diem_doc
+        
+        # 4. Lưu vào Database
+        sql = """INSERT INTO ket_qua_thi_iig 
+                 (id_hoc_sinh, id_de_thi, so_cau_nghe_dung, so_cau_doc_dung, diem_nghe, diem_doc, tong_diem, chi_tiet_json)
+                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
+        
+        cursor.execute(sql, (data.id_hoc_sinh, data.id_de_thi, so_cau_nghe, so_cau_doc, diem_nghe, diem_doc, tong_diem, json.dumps(chi_tiet_bai_lam)))
+        id_ket_qua = cursor.lastrowid
+        
+        db.commit()
+        cursor.close()
+        db.close()
+        
+        return {
+            "status": "success", 
+            "message": "Nộp bài thành công!",
+            "id_ket_qua": id_ket_qua, # Trả về ID này để lát mở trang Xem Lại
+            "diem_so": {"nghe": diem_nghe, "doc": diem_doc, "tong": tong_diem}
+        }
+        
+    except Exception as e:
+        print("Lỗi chấm IIG:", e)
+        return {"status": "error", "message": str(e)}
+    
+
+
+# ==========================================
+# LẤY CHI TIẾT KẾT QUẢ THI IIG ĐỂ XEM LẠI
+# ==========================================
+@router.get("/get-iig-result/{id_ket_qua}")
+async def get_iig_result(id_ket_qua: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        sql = """
+            SELECT k.*, d.ten_de, d.file_pdf, d.file_audio 
+            FROM ket_qua_thi_iig k
+            JOIN de_thi_iig d ON k.id_de_thi = d.id
+            WHERE k.id = %s
+        """
+        cursor.execute(sql, (id_ket_qua,))
+        result = cursor.fetchone()
+        
+        db.close()
+        
+        if not result:
+            return {"status": "error", "message": "Không tìm thấy dữ liệu bài làm."}
+            
+        result['chi_tiet_json'] = json.loads(result['chi_tiet_json'])
+        
+        return {"status": "success", "data": result}
+        
+    except Exception as e:
+        print("Lỗi lấy kết quả IIG:", e)
+        return {"status": "error", "message": str(e)}
+    
+    
+# ==========================================
+# HỌC SINH LẤY KHO ĐỀ KÈM TRẠNG THÁI ĐÃ LÀM
+# ==========================================
+@router.get("/get-iig-tests/{id_hoc_sinh}")
+async def get_student_iig_tests(id_hoc_sinh: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        sql = """
+            SELECT d.id, d.ten_de, d.nam_phat_hanh, d.ngay_tao,
+                   k.id as id_ket_qua, k.tong_diem, k.ngay_thi
+            FROM de_thi_iig d
+            LEFT JOIN (
+                SELECT id_de_thi, MAX(id) as id, tong_diem, MAX(ngay_thi) as ngay_thi 
+                FROM ket_qua_thi_iig 
+                WHERE id_hoc_sinh = %s 
+                GROUP BY id_de_thi, tong_diem
+            ) k ON d.id = k.id_de_thi
+            ORDER BY d.ngay_tao DESC
+        """
+        cursor.execute(sql, (id_hoc_sinh,))
+        tests = cursor.fetchall()
+        
+        cursor.close()
+        db.close()
+        return {"status": "success", "data": tests}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    
+
+# ==========================================
+# API HỌC SINH: LẤY THÔNG BÁO CỦA LỚP MÌNH
+# ==========================================
+@router.get("/get-class-notices/{acc_id}")
+async def get_student_class_notices(acc_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        # 1. Tìm xem học sinh này thuộc lớp nào
+        cursor.execute("SELECT id_lop FROM hoc_sinh WHERE id_tai_khoan = %s", (acc_id,))
+        hs = cursor.fetchone()
+        
+        if not hs or not hs['id_lop']:
+            return {"status": "success", "data": []} # Chưa có lớp thì trả về mảng rỗng
+            
+        # 2. Lấy toàn bộ thông báo của lớp đó
+        cursor.execute("SELECT * FROM thong_bao_lop WHERE id_lop = %s ORDER BY ngay_tao DESC", (hs['id_lop'],))
+        notices = cursor.fetchall()
+        
+        db.close()
+        return {"status": "success", "data": notices}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

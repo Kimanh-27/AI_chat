@@ -44,8 +44,8 @@ async def upload_iig(
         cursor = db.cursor()
         sql = """INSERT INTO de_thi_iig (ten_de, nam_phat_hanh, file_pdf, file_audio, dap_an_json) 
                  VALUES (%s, %s, %s, %s, %s)"""
-        cursor.execute(sql, (ten_de, nam_phat_hanh, f"http://127.0.0.1:8000/{pdf_path}", 
-                             f"http://127.0.0.1:8000/{audio_path}" if audio_path else None, dap_an_json))
+        cursor.execute(sql, (ten_de, nam_phat_hanh, f"{pdf_path}", 
+                     f"{audio_path}" if audio_path else None, dap_an_json))
         db.commit()
         cursor.close()
         db.close()
@@ -446,7 +446,7 @@ async def tao_tin_tuc(
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(anh_dai_dien.file, buffer)
             
-        db_img_path = f"http://127.0.0.1:8000/{file_path.replace(os.sep, '/')}"
+        db_img_path = file_path.replace(os.sep, '/')
 
         db = get_db_connection()
         cursor = db.cursor()
@@ -513,7 +513,7 @@ async def update_news(
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(anh_dai_dien.file, buffer)
                 
-            db_img_path = f"http://127.0.0.1:8000/{file_path.replace(os.sep, '/')}"
+            db_img_path = file_path.replace(os.sep, '/')
             
             sql = """UPDATE tin_tuc SET tieu_de = %s, tom_tat = %s, noi_dung = %s, anh_dai_dien = %s WHERE id = %s"""
             cursor.execute(sql, (tieu_de, tom_tat, noi_dung, db_img_path, news_id))

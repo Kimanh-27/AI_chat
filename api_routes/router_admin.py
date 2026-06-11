@@ -126,7 +126,14 @@ async def get_classes_by_teacher(teacher_id: int):
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        cursor.execute("SELECT id, ten_lop, ma_tham_gia FROM lop_hoc WHERE id_giao_vien = %s", (teacher_id,))
+        sql = """
+            SELECT l.id, l.ten_lop, l.ma_tham_gia, COUNT(h.id_tai_khoan) as so_luong_hoc_sinh 
+            FROM lop_hoc l 
+            LEFT JOIN hoc_sinh h ON l.id = h.id_lop 
+            WHERE l.id_giao_vien = %s 
+            GROUP BY l.id
+        """
+        cursor.execute(sql, (teacher_id,))
         classes = cursor.fetchall()
         db.close()
         return {"status": "success", "data": classes}

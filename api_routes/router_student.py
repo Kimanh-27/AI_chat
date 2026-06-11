@@ -16,7 +16,7 @@ async def get_student_homeworks(id_hoc_sinh: int, id_lop: int):
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         
-        # Chỉ lấy bài giao chung cho cả lớp (id_hoc_sinh = NULL/0) HOẶC giao đích danh cho em này
+        # giao bài chung hoặc giao riêng cho học sinh
         sql = """
             SELECT b.*, 
                    (SELECT COUNT(*) FROM lich_su_lam_bai l 
@@ -41,20 +41,17 @@ async def get_homework_detail(id_bai_tap: int):
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         
-        # 1. Lấy thông tin bài tập
         cursor.execute("SELECT * FROM bai_tap_giao WHERE id = %s", (id_bai_tap,))
         hw = cursor.fetchone()
         
         if not hw:
             return {"status": "error", "message": "Không tìm thấy bài tập!"}
             
-        # 2. Lấy danh sách ID câu hỏi từ CSDL
         ids = json.loads(hw['danh_sach_cau_hoi'])
         
         if not ids:
             return {"status": "success", "homework": hw, "questions": []}
             
-        # 3. Lấy đúng các câu hỏi đó ra
         format_strings = ','.join(['%s'] * len(ids))
         
         cursor.execute(f"SELECT * FROM ngan_hang_cau_hoi WHERE id IN ({format_strings})", tuple(ids))
@@ -73,35 +70,27 @@ async def save_history(data: HistoryData):
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         
-        # 1. Đọc chi tiết từng câu hỏi học sinh vừa nộp
         chi_tiet = json.loads(data.chi_tiet_bai_lam)
         
-        # Cái giỏ để phân loại điểm số. Ví dụ: {'part_3': {'diem': 2, 'tong': 3, 'chi_tiet': [...]}}
         part_stats = {}
 
         for item in chi_tiet:
-            # 2. Lục DB xem câu hỏi này thực chất thuộc Part nào
             cursor.execute("SELECT part FROM ngan_hang_cau_hoi WHERE id = %s", (item['id_cau_hoi'],))
             q_info = cursor.fetchone()
             
-            # Nếu tìm thấy thì lấy part chuẩn, không thì lấy part mặc định gửi lên
             actual_part = q_info['part'] if q_info else data.part 
 
-            # Nếu cái rổ cho Part này chưa có, thì tạo mới
             if actual_part not in part_stats:
                 part_stats[actual_part] = {'diem': 0, 'tong': 0, 'chi_tiet': []}
             
-            # 3. Chấm điểm rớt vào đúng rổ của Part đó
             part_stats[actual_part]['tong'] += 1
             if item.get('is_correct'):
                 part_stats[actual_part]['diem'] += 1
             part_stats[actual_part]['chi_tiet'].append(item)
 
-        # 4. Lưu vào Database thành NHIỀU DÒNG (Mỗi Part 1 dòng)
         sql_insert = "INSERT INTO lich_su_lam_bai (id_hoc_sinh, part, diem_so, tong_so_cau, chi_tiet_bai_lam, id_bai_tap) VALUES (%s, %s, %s, %s, %s, %s)"
         
         for p, stats in part_stats.items():
-            # Chỉ lưu những Part thực sự có câu hỏi trong bài làm
             if stats['tong'] > 0:
                 chi_tiet_json = json.dumps(stats['chi_tiet'])
                 cursor.execute(sql_insert, (data.id_hoc_sinh, p, stats['diem'], stats['tong'], chi_tiet_json, data.id_bai_tap))
@@ -121,10 +110,8 @@ async def save_history(data: HistoryData):
 async def get_history(part: str, id_hoc_sinh: int):
     try:
         conn = get_db_connection()
-        # Sử dụng dictionary=True (nếu dùng mysql-connector) hoặc pymysql.cursors.DictCursor để trả về dạng JSON dễ đọc
         cursor = conn.cursor(dictionary=True) 
         
-        # Truy vấn lấy lịch sử, sắp xếp ngày làm bài MỚI NHẤT lên đầu
         sql = """
             SELECT id, diem_so, tong_so_cau, thoi_gian_nop, chi_tiet_bai_lam 
             FROM lich_su_lam_bai 
@@ -197,7 +184,6 @@ async def get_student_practice_questions(part_name: str, id_hoc_sinh: int):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        # 1. Truy ngược xem học sinh này đang học lớp nào, do giáo viên nào dạy
         cursor.execute("""
             SELECT l.id_giao_vien 
             FROM hoc_sinh h 
@@ -208,11 +194,10 @@ async def get_student_practice_questions(part_name: str, id_hoc_sinh: int):
         
         if not gv_info:
             db.close()
-            return {"status": "success", "data": []} # Học sinh chưa có lớp -> Trống
+            return {"status": "success", "data": []} 
             
         id_giao_vien = gv_info['id_giao_vien']
         
-        # 2. Lấy đúng câu hỏi do giáo viên đó biên soạn
         sql = "SELECT * FROM ngan_hang_cau_hoi WHERE part = %s AND id_giao_vien = %s ORDER BY id DESC"
         cursor.execute(sql, (part_name, id_giao_vien))
         questions = cursor.fetchall()
@@ -234,7 +219,6 @@ async def get_student_iig_test(id_de_thi: int):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        # CHỈ SELECT các cột an toàn, TUYỆT ĐỐI KHÔNG SELECT dap_an_json
         sql = "SELECT id, ten_de, file_pdf, file_audio FROM de_thi_iig WHERE id = %s"
         cursor.execute(sql, (id_de_thi,))
         test = cursor.fetchone()
@@ -255,7 +239,6 @@ async def submit_iig_test(data: IIGSubmitData):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        # 1. Lấy đáp án gốc từ Database
         cursor.execute("SELECT dap_an_json FROM de_thi_iig WHERE id = %s", (data.id_de_thi,))
         de_thi = cursor.fetchone()
         
@@ -265,7 +248,6 @@ async def submit_iig_test(data: IIGSubmitData):
         dap_an_chuan = json.loads(de_thi['dap_an_json'])
         dap_an_hoc_sinh = data.dap_an_hoc_sinh
         
-        # 2. Logic chấm điểm
         so_cau_nghe = 0
         so_cau_doc = 0
         chi_tiet_bai_lam = []
@@ -280,7 +262,6 @@ async def submit_iig_test(data: IIGSubmitData):
                 if i < 100: so_cau_nghe += 1
                 else: so_cau_doc += 1
                 
-            # Lưu lại chi tiết
             chi_tiet_bai_lam.append({
                 "cau_so": cau_so,
                 "da_chon": chon,
@@ -288,12 +269,10 @@ async def submit_iig_test(data: IIGSubmitData):
                 "is_correct": is_correct
             })
             
-        # 3. Quy đổi điểm TOEIC
         diem_nghe = min(so_cau_nghe * 5, 495) if so_cau_nghe > 0 else 5
         diem_doc = min(so_cau_doc * 5, 495) if so_cau_doc > 0 else 5
         tong_diem = diem_nghe + diem_doc
         
-        # 4. Lưu vào Database
         sql = """INSERT INTO ket_qua_thi_iig 
                  (id_hoc_sinh, id_de_thi, so_cau_nghe_dung, so_cau_doc_dung, diem_nghe, diem_doc, tong_diem, chi_tiet_json)
                  VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
@@ -308,7 +287,7 @@ async def submit_iig_test(data: IIGSubmitData):
         return {
             "status": "success", 
             "message": "Nộp bài thành công!",
-            "id_ket_qua": id_ket_qua, # Trả về ID này để lát mở trang Xem Lại
+            "id_ket_qua": id_ket_qua, 
             "diem_so": {"nghe": diem_nghe, "doc": diem_doc, "tong": tong_diem}
         }
         
@@ -390,14 +369,12 @@ async def get_student_class_notices(acc_id: int):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        # 1. Tìm xem học sinh này thuộc lớp nào
         cursor.execute("SELECT id_lop FROM hoc_sinh WHERE id_tai_khoan = %s", (acc_id,))
         hs = cursor.fetchone()
         
         if not hs or not hs['id_lop']:
-            return {"status": "success", "data": []} # Chưa có lớp thì trả về mảng rỗng
+            return {"status": "success", "data": []} 
             
-        # 2. Lấy toàn bộ thông báo của lớp đó
         cursor.execute("SELECT * FROM thong_bao_lop WHERE id_lop = %s ORDER BY ngay_tao DESC", (hs['id_lop'],))
         notices = cursor.fetchall()
         

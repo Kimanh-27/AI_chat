@@ -71,9 +71,12 @@ async def generate_toeic(
         conn.close()
 
         strict_rule = f"""
-\nYÊU CẦU AUTO-TAGGING (RẤT QUAN TRỌNG): Hãy sinh ra một bộ câu hỏi trộn lẫn các dạng chuẩn TOEIC. 
-Với MỖI câu hỏi được sinh ra, bạn phải tự phân tích xem nó thuộc dạng nào trong Menu dưới đây, và THÊM trường "id_dang_bai" (chứa số ID tương ứng) vào cục JSON của câu hỏi đó. 
-MENU DẠNG BÀI HIỆN CÓ: [{menu_dang_bai}].
+\n[QUY TRÌNH AUTO-TAGGING BẮT BUỘC NGHIÊM NGẶT]
+Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
+Để đảm bảo chất lượng, bạn PHẢI làm theo đúng trình tự 3 bước sau:
+1. CHỌN DẠNG BÀI TRƯỚC: Chọn ngẫu nhiên {q_count} ID từ danh sách trên (cố gắng phân bổ đều, không lặp lại 1 ID quá nhiều lần).
+2. SINH CÂU HỎI: Dựa vào hình ảnh/bối cảnh và MỖI ID vừa chọn, hãy viết ra 1 câu hỏi chuẩn TOEIC bám sát đúng bản chất của dạng bài đó.
+3. GẮN ID VÀO JSON: Bắt buộc mỗi object câu hỏi trả về phải có key "id_dang_bai" mang giá trị là ID bạn đã chọn ở Bước 1. Tuyệt đối không được bỏ trống (null).
 """
         final_prompt = config["system_prompt"].replace("{num_questions}", str(q_count)) + strict_rule
 
@@ -188,11 +191,27 @@ async def generate_questions_api(req: QuestionRequest):
         if not config:
             return {"status": "error", "message": "Part này chưa được hỗ trợ."}
 
-        system_prompt = config["system_prompt"] + f"\n\nYêu cầu bổ sung: Hãy sinh ra CHÍNH XÁC {req.num_questions} câu hỏi."
+        # LẤY MENU DẠNG BÀI TỪ DATABASE ---
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT id, ten_dang FROM danh_muc_dang_bai WHERE part = %s", (req.part,))
+        danh_sach_dang = cursor.fetchall()
+        menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
+        conn.close()
+
+        strict_rule = f"""
+\n[QUY TRÌNH AUTO-TAGGING BẮT BUỘC NGHIÊM NGẶT]
+Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
+Để đảm bảo chất lượng, bạn PHẢI làm theo đúng trình tự 3 bước sau để tạo {req.num_questions} câu:
+1. CHỌN DẠNG BÀI TRƯỚC: Chọn ngẫu nhiên {req.num_questions} ID từ danh sách trên (cố gắng phân bổ đều, không lặp lại 1 ID quá nhiều lần).
+2. SINH CÂU HỎI: Với MỖI ID vừa chọn, hãy suy nghĩ và viết ra 1 câu hỏi chuẩn TOEIC bám sát đúng bản chất của dạng bài đó.
+3. GẮN ID VÀO JSON: Bắt buộc mỗi object câu hỏi trả về phải có key "id_dang_bai" mang giá trị là ID bạn đã chọn ở Bước 1. Tuyệt đối không được bỏ trống (null).
+"""
+        system_prompt = config["system_prompt"] + strict_rule
         
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        print(f"Đang sinh {req.num_questions} câu cho {req.part}...")
+        print(f"Đang sinh {req.num_questions} câu cho {req.part} theo chuỗi tư duy mới...")
         response = await model.generate_content_async(system_prompt)
         
         raw_text = response.text.strip()

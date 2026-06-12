@@ -387,7 +387,7 @@ TUYỆT ĐỐI KHÔNG lặp lại lời chào (như "Chào bạn!", "Mình là N
             cursor.close()
             db.close()
         except Exception as e:
-            pass # Lỗi DB kệ nó, không làm sập tiến trình chat
+            pass
 
         nova_tasks[task_id] = {"status": "done", "ket_qua": result, "session_id": current_session_id}
         

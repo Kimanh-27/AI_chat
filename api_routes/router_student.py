@@ -78,7 +78,8 @@ async def save_history(data: HistoryData):
             cursor.execute("SELECT part FROM ngan_hang_cau_hoi WHERE id = %s", (item['id_cau_hoi'],))
             q_info = cursor.fetchone()
             
-            actual_part = q_info['part'] if q_info else data.part 
+            raw_part = q_info['part'] if q_info else data.part
+            actual_part = str(raw_part).strip().lower()
 
             if actual_part not in part_stats:
                 part_stats[actual_part] = {'diem': 0, 'tong': 0, 'chi_tiet': []}

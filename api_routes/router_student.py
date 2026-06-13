@@ -270,8 +270,18 @@ async def submit_iig_test(data: IIGSubmitData):
                 "is_correct": is_correct
             })
             
-        diem_nghe = min(so_cau_nghe * 5, 495) if so_cau_nghe > 0 else 5
-        diem_doc = min(so_cau_doc * 5, 495) if so_cau_doc > 0 else 5
+        if so_cau_nghe == 0:
+            diem_nghe = 5
+        else:
+            diem_nghe = min(so_cau_nghe * 5, 495)
+            if diem_nghe < 5: diem_nghe = 5 
+            
+        if so_cau_doc == 0:
+            diem_doc = 5
+        else:
+            diem_doc = min(so_cau_doc * 5, 495)
+            if diem_doc < 5: diem_doc = 5 
+            
         tong_diem = diem_nghe + diem_doc
         
         sql = """INSERT INTO ket_qua_thi_iig 

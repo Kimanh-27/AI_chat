@@ -64,6 +64,9 @@ class SaveAndAssignRequest(BaseModel):
     ten_bai_tap: str
     questions: list
 
+class DeleteHomeworkRequest(BaseModel):
+    ids: List[int]
+
 class SaveExamModel(BaseModel):
     tieu_de: str
     noi_dung: str
@@ -115,3 +118,4 @@ class ThongBaoLopModel(BaseModel):
     id_lop: int
     tieu_de: str
     noi_dung: str
+

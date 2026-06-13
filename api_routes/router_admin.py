@@ -111,16 +111,21 @@ async def get_all_teachers():
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        cursor.execute("""
-            SELECT id, ten_dang_nhap, email 
-            FROM tai_khoan WHERE vai_tro = 'teacher'
-        """)
+        sql = """
+            SELECT t.id, t.ten_dang_nhap, t.email, COUNT(l.id) as so_luong_lop
+            FROM tai_khoan t
+            LEFT JOIN lop_hoc l ON t.id = l.id_giao_vien
+            WHERE t.vai_tro = 'teacher'
+            GROUP BY t.id
+            ORDER BY t.id DESC
+        """
+        
+        cursor.execute(sql)
         teachers = cursor.fetchall()
         db.close()
         return {"status": "success", "data": teachers}
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
 @router.get("/get-classes-by-teacher/{teacher_id}")
 async def get_classes_by_teacher(teacher_id: int):
     try:

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from database import get_db_connection
-from schemas import HomeworkData, RemedialGenRequest, SaveAndAssignRequest,ThongBaoLopModel
+from schemas import HomeworkData, RemedialGenRequest, SaveAndAssignRequest,ThongBaoLopModel,DeleteHomeworkRequest
 import json
 import datetime
 import random
@@ -151,6 +151,57 @@ async def get_teacher_homeworks(id_giao_vien: int):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+# API Cập nhật Bài tập giao
+@router.post("/update-homework/{id_bai_tap}")
+async def update_homework(id_bai_tap: int, data: dict):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        #kiểm tra giao riêng hay giao chung
+        cursor.execute("SELECT id_hoc_sinh FROM bai_tap_giao WHERE id = %s", (id_bai_tap,))
+        hw_info = cursor.fetchone()
+        
+        if not hw_info:
+            return {"status": "error", "message": "Không tìm thấy bài tập."}
+            
+        new_deadline = data.get('han_nop')
+        new_lop = data.get('id_lop')
+        
+        # nếu là bài tập giao theo lớp (id_hoc_sinh bị trống/null) -> Cập nhật cả Lớp và Hạn nộp
+        if hw_info.get('id_hoc_sinh') is None:
+            sql = "UPDATE bai_tap_giao SET han_nop = %s, id_lop = %s WHERE id = %s"
+            cursor.execute(sql, (new_deadline, new_lop, id_bai_tap))
+        # Nếu là bài tập cá nhân -> KHÔNG ĐƯỢC ĐỔI LỚP, chỉ cho phép đổi Hạn nộp
+        else:
+            sql = "UPDATE bai_tap_giao SET han_nop = %s WHERE id = %s"
+            cursor.execute(sql, (new_deadline, id_bai_tap))
+
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "Cập nhật thành công!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/delete-homeworks")
+async def delete_homeworks(req: DeleteHomeworkRequest):
+    try:
+        if not req.ids:
+            return {"status": "error", "message": "Không có bài tập nào được chọn."}
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # chuỗi định dạng %s,%s,%s tương ứng với số lượng ID cần xóa
+        format_strings = ','.join(['%s'] * len(req.ids))
+        sql = f"DELETE FROM bai_tap_giao WHERE id IN ({format_strings})"
+        cursor.execute(sql, tuple(req.ids))
+        
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "Đã xóa thành công!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    
 
 #======================================================
 # Giáo viên xem chi tiết kết quả của 1 bài tập

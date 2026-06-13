@@ -266,14 +266,34 @@ async def add_account(acc: AccountModel):
     try:
         db = get_db_connection()
         cursor = db.cursor()
-        
-        if acc.vai_tro == 'student':
+        # 1. BẮT LỖI TRÙNG EMAIL
+        if acc.email and acc.email.strip() != "":
+            cursor.execute("SELECT id FROM tai_khoan WHERE email = %s", (acc.email.strip(),))
+            if cursor.fetchone():
+                db.close()
+                return {"status": "error", "message": "Email này đã được sử dụng trên hệ thống!"}
+        if acc.vai_tro == 'teacher':
+            # bắt lỗi trùng Tên đăng nhập
+            if acc.ten_dang_nhap and acc.ten_dang_nhap.strip() != "":
+                cursor.execute("SELECT id FROM tai_khoan WHERE ten_dang_nhap = %s", (acc.ten_dang_nhap.strip(),))
+                if cursor.fetchone():
+                    db.close()
+                    return {"status": "error", "message": "Tên đăng nhập này đã tồn tại!"}
+                    
+            if not acc.mat_khau or acc.mat_khau.strip() == "":
+                acc.mat_khau = "123456"
+                
+        elif acc.vai_tro == 'student':
+            # bắt lỗi trùng số điện thoại
+            if acc.so_dien_thoai and acc.so_dien_thoai.strip() != "":
+                cursor.execute("SELECT id_tai_khoan FROM hoc_sinh WHERE so_dien_thoai = %s", (acc.so_dien_thoai.strip(),))
+                if cursor.fetchone():
+                    db.close()
+                    return {"status": "error", "message": "Số điện thoại này đã được đăng ký bởi học sinh khác!"}
+                    
             acc.ten_dang_nhap = tao_ten_dang_nhap(cursor, acc.ten_hoc_sinh, acc.ngay_sinh)
             if not acc.mat_khau or acc.mat_khau.strip() == "":
                 acc.mat_khau = str(random.randint(100000, 999999))
-        else:
-            if not acc.mat_khau or acc.mat_khau.strip() == "":
-                acc.mat_khau = "123456"
                 
         hashed_password = hash_password(acc.mat_khau)
         
@@ -299,12 +319,20 @@ async def add_account(acc: AccountModel):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
 @router.post("/update-account/{acc_id}")
 async def update_account(acc_id: int, acc: AccountModel):
     try:
         db = get_db_connection()
         cursor = db.cursor()
         
+        # BẮT LỖI TRÙNG EMAIL
+        if acc.email and acc.email.strip() != "":
+            cursor.execute("SELECT id FROM tai_khoan WHERE email = %s AND id != %s", (acc.email.strip(), acc_id))
+            if cursor.fetchone():
+                db.close()
+                return {"status": "error", "message": "Email này đã được sử dụng bởi một tài khoản khác!"}
+
         cursor.execute("UPDATE tai_khoan SET email = %s WHERE id = %s", (acc.email, acc_id))
         
         if acc.mat_khau and acc.mat_khau.strip() != "":
@@ -312,8 +340,23 @@ async def update_account(acc_id: int, acc: AccountModel):
             cursor.execute("UPDATE tai_khoan SET mat_khau = %s WHERE id = %s", (hashed_password, acc_id))
         
         if acc.vai_tro == 'teacher':
+            # Bắt lỗi trùng Tên đăng nhập
+            if acc.ten_dang_nhap and acc.ten_dang_nhap.strip() != "":
+                cursor.execute("SELECT id FROM tai_khoan WHERE ten_dang_nhap = %s AND id != %s", (acc.ten_dang_nhap.strip(), acc_id))
+                if cursor.fetchone():
+                    db.close()
+                    return {"status": "error", "message": "Tên đăng nhập này đã có người sử dụng!"}
+            
             cursor.execute("UPDATE tai_khoan SET ten_dang_nhap = %s WHERE id = %s", (acc.ten_dang_nhap, acc_id))
+            
         elif acc.vai_tro == 'student':
+            # Bắt lỗi trùng Số điện thoại 
+            if acc.so_dien_thoai and acc.so_dien_thoai.strip() != "":
+                cursor.execute("SELECT id_tai_khoan FROM hoc_sinh WHERE so_dien_thoai = %s AND id_tai_khoan != %s", (acc.so_dien_thoai.strip(), acc_id))
+                if cursor.fetchone():
+                    db.close()
+                    return {"status": "error", "message": "Số điện thoại này thuộc về học sinh khác!"}
+                    
             cursor.execute("UPDATE hoc_sinh SET ten_hoc_sinh = %s, ngay_sinh = %s, so_dien_thoai = %s WHERE id_tai_khoan = %s", 
                (acc.ten_hoc_sinh, acc.ngay_sinh, acc.so_dien_thoai, acc_id))
             
@@ -322,6 +365,7 @@ async def update_account(acc_id: int, acc: AccountModel):
         return {"status": "success", "message": "Đã cập nhật tài khoản thành công!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+    
     
 @router.post("/delete-account/{acc_id}")
 async def delete_account(acc_id: int):
@@ -391,6 +435,13 @@ async def add_class(cls: ClassModel):
     try:
         db = get_db_connection()
         cursor = db.cursor()
+        
+        # Kiểm tra lớp trùng tên của cùng một giáo viên
+        cursor.execute("SELECT id FROM lop_hoc WHERE ten_lop = %s AND id_giao_vien = %s", (cls.ten_lop.strip(), cls.id_giao_vien))
+        if cursor.fetchone():
+            db.close()
+            return {"status": "error", "message": "Giáo viên này đã có một lớp học mang tên này rồi!"}
+            
         cursor.execute("INSERT INTO lop_hoc (ten_lop, ma_tham_gia, id_giao_vien) VALUES (%s, %s, %s)", 
                (cls.ten_lop, cls.ma_tham_gia, cls.id_giao_vien))
         db.commit()
@@ -403,7 +454,22 @@ async def add_class(cls: ClassModel):
 async def update_class(class_id: int, cls: ClassModel):
     try:
         db = get_db_connection()
-        cursor = db.cursor()
+        cursor = db.cursor(dictionary=True) 
+        
+        # kiểm tra trùng trong phạm vi giáo viên
+        cursor.execute("SELECT id_giao_vien FROM lop_hoc WHERE id = %s", (class_id,))
+        lop_hien_tai = cursor.fetchone()
+        if not lop_hien_tai:
+            db.close()
+            return {"status": "error", "message": "Lớp học không tồn tại!"}
+            
+        id_giao_vien = lop_hien_tai['id_giao_vien']
+        # Kiểm tra lớp trùng tên
+        cursor.execute("SELECT id FROM lop_hoc WHERE ten_lop = %s AND id_giao_vien = %s AND id != %s", (cls.ten_lop.strip(), id_giao_vien, class_id))
+        if cursor.fetchone():
+            db.close()
+            return {"status": "error", "message": "Tên lớp này bị trùng với một lớp khác của cùng giáo viên!"}
+            
         cursor.execute("UPDATE lop_hoc SET ten_lop = %s, ma_tham_gia = %s WHERE id = %s", 
                (cls.ten_lop, cls.ma_tham_gia, class_id))
         db.commit()
@@ -582,31 +648,34 @@ async def get_user_profile(acc_id: int):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# ĐÃ XÓA HÀM BỊ TRÙNG LẶP, CHỈ GIỮ LẠI HÀM HOÀN CHỈNH NÀY
 @router.post("/update-profile/{acc_id}")
 async def user_update_profile(acc_id: int, req: UpdateProfileModel):
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        
-        # --- CẬP NHẬT TÀI KHOẢN (Email & Pass) ---
+        # --- CẬP NHẬT TÀI KHOẢN 
         cursor.execute("SELECT mat_khau FROM tai_khoan WHERE id = %s", (acc_id,))
         user = cursor.fetchone()
         if not user:
             return {"status": "error", "message": "Tài khoản không tồn tại!"}
 
         if req.email and req.email.strip() != "":
-            cursor.execute("UPDATE tai_khoan SET email = %s WHERE id = %s", (req.email, acc_id))
+            # Bắt lỗi trùng Email
+            cursor.execute("SELECT id FROM tai_khoan WHERE email = %s AND id != %s", (req.email.strip(), acc_id))
+            if cursor.fetchone():
+                db.close()
+                return {"status": "error", "message": "Email này đã được tài khoản khác sử dụng!"}
+                
+            cursor.execute("UPDATE tai_khoan SET email = %s WHERE id = %s", (req.email.strip(), acc_id))
             
         if req.mat_khau_moi and req.mat_khau_moi.strip() != "":
-            # NÂNG CẤP BCRYPT CHO ĐỔI MẬT KHẨU
             if not bcrypt.checkpw(req.mat_khau_cu.encode('utf-8'), user['mat_khau'].encode('utf-8')):
                 return {"status": "error", "message": "Mật khẩu hiện tại không chính xác!"}
                 
             hashed_new = hash_password(req.mat_khau_moi)
             cursor.execute("UPDATE tai_khoan SET mat_khau = %s WHERE id = %s", (hashed_new, acc_id))
             
-        # --- CẬP NHẬT HỌC SINH (Giữ giá trị cũ nếu rỗng) ---
+        # --- CẬP NHẬT HỌC SINH 
         if req.vai_tro == 'student':
             cursor.execute("SELECT ten_hoc_sinh, ngay_sinh, so_dien_thoai FROM hoc_sinh WHERE id_tai_khoan = %s", (acc_id,))
             hs_old = cursor.fetchone()
@@ -619,6 +688,11 @@ async def user_update_profile(acc_id: int, req: UpdateProfileModel):
                 if req.so_dien_thoai and req.so_dien_thoai.strip() != "":
                     if not re.match(r"^(0[35789])[0-9]{8}$", req.so_dien_thoai.strip()):
                         return {"status": "error", "message": "Số điện thoại không hợp lệ!"}
+                    # Bắt lỗi trùng Số điện thoại
+                    cursor.execute("SELECT id_tai_khoan FROM hoc_sinh WHERE so_dien_thoai = %s AND id_tai_khoan != %s", (req.so_dien_thoai.strip(), acc_id))
+                    if cursor.fetchone():
+                        db.close()
+                        return {"status": "error", "message": "Số điện thoại này đã được học sinh khác sử dụng!"}
                         
                 cursor.execute("""
                     UPDATE hoc_sinh 

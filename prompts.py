@@ -213,7 +213,7 @@ LƯU Ý CỰC KỲ QUAN TRỌNG VỀ ĐỊNH DẠNG (BẮT BUỘC TUÂN THỦ):
 TRẢ VỀ MẢNG JSON THEO CẤU TRÚC SAU:
 [
   {
-    "doan_van": "[Nội dung đoạn văn bắt đầu ngay lập tức, không có câu mào đầu giới thiệu số câu hỏi...]",
+    "doan_van": "[Nội dung đoạn văn bắt đầu ngay lập tức, không có câu mở đầu giới thiệu số câu hỏi...]",
     "danh_sach_cau_hoi": [
       {
         "cau_hoi": "What is the main purpose of this email?",

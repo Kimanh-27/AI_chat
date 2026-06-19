@@ -62,7 +62,6 @@ async def get_class_statistics(id_lop: int):
             JOIN hoc_sinh h ON l.id_hoc_sinh = h.id_tai_khoan
             WHERE h.id_lop = %s
             ORDER BY l.thoi_gian_nop DESC 
-            LIMIT 100
         """, (id_lop,))
         recent_activities = cursor.fetchall()
 
@@ -75,7 +74,6 @@ async def get_class_statistics(id_lop: int):
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
 
 #=============================================================
 #===            GIÁO VIÊN GIAO BÀI TẬP              ==========

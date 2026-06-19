@@ -1,10 +1,14 @@
 from fastapi import APIRouter
 from database import get_db_connection
-from schemas import HomeworkData, RemedialGenRequest, SaveAndAssignRequest,ThongBaoLopModel,DeleteHomeworkRequest
+from fastapi import APIRouter,Form
+from schemas import HomeworkData,SaveAndAssignRequest,ThongBaoLopModel,DeleteHomeworkRequest
 import json
 import datetime
 import random
+import re
+from prompts import TOEIC_CONFIG
 import google.generativeai as genai
+
 
 router = APIRouter()
 

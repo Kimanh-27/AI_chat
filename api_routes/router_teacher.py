@@ -282,7 +282,6 @@ async def evaluate_student_performance(id_hoc_sinh: int):
                 })
         weak_parts.sort(key=lambda x: x['accuracy'])
 
-        # 2. LỤC TÌM NỘI DUNG CÂU HỎI MÀ HỌC SINH ĐÃ LÀM SAI
         cursor.execute("""
             SELECT chi_tiet_bai_lam
             FROM lich_su_lam_bai
@@ -297,7 +296,6 @@ async def evaluate_student_performance(id_hoc_sinh: int):
                 try:
                     chi_tiet = json.loads(t['chi_tiet_bai_lam'])
                     for item in chi_tiet:
-                        # Lấy các câu có is_correct = 0 hoặc False
                         if not item.get('is_correct') and item.get('id_cau_hoi'):
                             wrong_ids.append(str(item['id_cau_hoi']))
                 except: pass
@@ -305,7 +303,6 @@ async def evaluate_student_performance(id_hoc_sinh: int):
         wrong_questions_text = ""
         if wrong_ids:
             import random
-            # Trích xuất ngẫu nhiên 10 câu sai để AI không bị quá tải
             sample_ids = random.sample(wrong_ids, min(len(wrong_ids), 10))
             format_strings = ','.join(['%s'] * len(sample_ids))
             
@@ -317,11 +314,9 @@ async def evaluate_student_performance(id_hoc_sinh: int):
 
         db.close()
 
-        # 3. YÊU CẦU GEMINI BẮT ĐÚNG BỆNH TỪ VỰNG / NGỮ PHÁP
         model = genai.GenerativeModel('gemini-2.5-flash')
         
         if not weak_parts:
-            # LUỒNG 1: HỌC SINH GIỎI (Không có Part nào < 50%)
             prompt = """Bạn là chuyên gia phân tích Giáo dục. Học sinh này có tất cả các kỹ năng đều đạt trên 50%, biểu hiện rất xuất sắc.
 YÊU CẦU BÁO CÁO CHO GIÁO VIÊN:
 Hãy viết 1 đoạn ngắn (khoảng 2 câu) báo cáo cho giáo viên, đánh giá học sinh có phong độ đồng đều và nắm vững kiến thức. 
@@ -332,7 +327,6 @@ TUYỆT ĐỐI KHÔNG phân tích lỗ hổng hay điểm yếu nào cả. KHÔN
             focus_topic_text = "Tiếp tục phát huy phong độ"
             
         else:
-            # LUỒNG 2: HỌC SINH YẾU (Có Part < 50%)
             weak_list_str = ", ".join([p['label'] for p in weak_parts])
             prompt = f"""Bạn là chuyên gia phân tích Giáo dục. Học sinh đang yếu các phần: {weak_list_str} (dưới 50%).
 Dưới đây là NỘI DUNG THỰC TẾ các câu hỏi học sinh đã làm sai:
@@ -351,10 +345,10 @@ YÊU CẦU BÁO CÁO CHO GIÁO VIÊN:
             focus_response = await model.generate_content_async(focus_prompt)
             focus_topic_text = focus_response.text.strip().replace('"', '')
 
-        # 4. TRẢ KẾT QUẢ VỀ FRONTEND
         return {
             "status": "success",
             "data": {
+                "id_hoc_sinh": id_hoc_sinh,
                 "nhan_xet": nhan_xet,
                 "focus_topic": focus_topic_text,
                 "weak_parts": weak_parts
@@ -410,44 +404,27 @@ async def get_class_progress(id_lop: int):
 # SINH ĐỀ KHẮC PHỤC TRỰC TIẾP TRONG MODAL
 # ==========================================
 @router.post("/generate-remedial")
-async def generate_remedial(req: RemedialGenRequest):
+async def generate_remedial(part: str = Form(...), num_items: int = Form(...), focus_topic: str = Form(...)):
     try:
-        parts_to_gen = req.parts
-        focus_info = req.focus_topic
+        config = TOEIC_CONFIG.get(part)
+        if not config:
+            return {"status": "error", "message": "Không tìm thấy cấu hình cho Part này."}
+
+        system_prompt = config["system_prompt"].replace("{num_questions}", str(num_items))
+        remedial_rule = f"\n\n[MỤC TIÊU KHẮC PHỤC LỖ HỔNG KIẾN THỨC BẮT BUỘC]: Hãy sinh đề tập trung hoàn toàn vào mảng bối cảnh/ngữ pháp/từ vựng sau đây: '{focus_topic}'."
+        final_prompt = system_prompt + remedial_rule
+
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = await model.generate_content_async(final_prompt)
+        raw_text = response.text.strip()
         
-        instruction = ""
-        if len(parts_to_gen) == 1:
-            p = parts_to_gen[0]
-            if p in ["part_3", "part_4", "part_6", "part_7"]:
-                instruction = f"Tạo 2 đoạn văn/hội thoại cho {p.upper()}, mỗi đoạn 3 câu hỏi trắc nghiệm."
-            else:
-                instruction = f"Tạo 10 câu hỏi trắc nghiệm lẻ cho {p.upper()}."
+        match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
+        if match:
+            clean_json = match.group(1)
+            parsed_data = json.loads(clean_json)
+            return {"status": "success", "data": parsed_data}
         else:
-            instruction = f"Tạo một đề hỗn hợp gồm các phần: {', '.join(parts_to_gen).upper()}. Tổng cộng khoảng 10 câu hỏi."
-
-        system_prompt = f"""Bạn là chuyên gia ra đề thi TOEIC. {instruction}
-Chủ đề điểm yếu cần tập trung xoáy sâu vào: "{focus_info}".
-
-BẮT BUỘC TRẢ VỀ CHUẨN JSON LÀ MỘT MẢNG (ARRAY) CÁC OBJECT CÓ CẤU TRÚC SAU:
-[
-  {{
-    "doan_van": "Nội dung đoạn văn (nếu có, nếu không để rỗng)",
-    "cau_hoi": "Nội dung câu hỏi",
-    "dap_an_a": "Lựa chọn A",
-    "dap_an_b": "Lựa chọn B",
-    "dap_an_c": "Lựa chọn C",
-    "dap_an_d": "Lựa chọn D",
-    "dap_an_dung": "A, B, C hoặc D",
-    "giai_thich": "Giải thích vì sao đúng"
-  }}
-]"""
-
-        model = genai.GenerativeModel(
-            model_name='gemini-2.5-flash',
-            generation_config={"response_mime_type": "application/json"}
-        )
-        response = await model.generate_content_async(system_prompt)
-        return {"status": "success", "data": json.loads(response.text)}
+            return {"status": "error", "message": "Nova không tạo ra được cấu trúc đề thi khắc phục lỗi."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

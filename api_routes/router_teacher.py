@@ -416,7 +416,10 @@ async def generate_remedial(part: str = Form(...), num_items: int = Form(...), f
         remedial_rule = f"\n\n[MỤC TIÊU KHẮC PHỤC LỖ HỔNG KIẾN THỨC BẮT BUỘC]: Hãy sinh đề tập trung hoàn toàn vào mảng bối cảnh/ngữ pháp/từ vựng sau đây: '{focus_topic}'."
         final_prompt = system_prompt + remedial_rule
 
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel(
+                'gemini-2.5-flash',
+                generation_config={"response_mime_type": "application/json"}
+            )
         response = await model.generate_content_async(final_prompt)
         raw_text = response.text.strip()
         

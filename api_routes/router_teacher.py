@@ -321,8 +321,8 @@ async def evaluate_student_performance(id_hoc_sinh: int):
         if not weak_parts:
             prompt = """Bạn là chuyên gia phân tích Giáo dục. Học sinh này có tất cả các kỹ năng đều đạt trên 50%, biểu hiện rất xuất sắc.
 YÊU CẦU BÁO CÁO CHO GIÁO VIÊN:
-Hãy viết 1 đoạn ngắn (khoảng 2 câu) báo cáo cho giáo viên, đánh giá học sinh có phong độ đồng đều và nắm vững kiến thức. 
-TUYỆT ĐỐI KHÔNG phân tích lỗ hổng hay điểm yếu nào cả. KHÔNG xưng hô với học sinh."""
+Hãy viết 1 đoạn ngắn (khoảng 2 câu) báo cáo cho giáo viên, đánh giá học sinh có phong độ đồng đều. 
+TUYỆT ĐỐI KHÔNG dùng các từ ngữ chào hỏi/thư từ như "Kính gửi", "Thưa", "Chào", "Báo cáo phân tích...". Đi thẳng trực tiếp vào câu đánh giá. KHÔNG xưng hô với học sinh."""
             
             response = await model.generate_content_async(prompt)
             nhan_xet = response.text.strip()
@@ -338,7 +338,8 @@ YÊU CẦU BÁO CÁO CHO GIÁO VIÊN:
 1. Đọc kỹ các câu hỏi sai, KẾT LUẬN CỤ THỂ học sinh đang hổng kiến thức ở DẠNG NÀO.
 2. Trình bày dưới dạng CÁC GẠCH ĐẦU DÒNG (dùng dấu -). Mỗi gạch đầu dòng là một vấn đề cụ thể, ngắn gọn.
 3. TUYỆT ĐỐI KHÔNG viết thành 1 đoạn văn dài liền mạch.
-4. Hành văn KHÁCH QUAN, CHUYÊN MÔN (Báo cáo cho giáo viên, không xưng hô với học sinh). Không dùng ký tự in đậm (**)."""
+4. Hành văn KHÁCH QUAN.
+5. LỆNH CẤM BẮT BUỘC: TUYỆT ĐỐI KHÔNG dùng các từ ngữ chào hỏi/thư từ như "Kính gửi", "Thưa", "Chào", "Báo cáo phân tích...". Bắt đầu ngay lập tức bằng gạch đầu dòng đầu tiên."""
             
             response = await model.generate_content_async(prompt)
             nhan_xet = response.text.strip()

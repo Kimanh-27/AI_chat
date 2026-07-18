@@ -119,3 +119,21 @@ class ThongBaoLopModel(BaseModel):
     tieu_de: str
     noi_dung: str
 
+
+class ChuDeModel(BaseModel):
+    chu_de: str
+    id_giao_vien: int
+
+class TuVungModel(BaseModel):
+    id_chu_de: int
+    id_giao_vien: int
+    tu: str
+    phien_am: Optional[str] = ""
+    nghia: str
+    vi_du: Optional[str] = ""
+    tu_dong_nghia: Optional[str] = ""
+
+class BulkTuVungModel(BaseModel):
+    id_chu_de: int
+    id_giao_vien: int
+    danh_sach_tu: List[TuVungModel]

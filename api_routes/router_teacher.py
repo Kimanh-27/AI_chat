@@ -1,8 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, UploadFile, File, Form
+from PIL import Image
 from database import get_db_connection
 from fastapi import APIRouter,Form
-from schemas import HomeworkData,SaveAndAssignRequest,ThongBaoLopModel,DeleteHomeworkRequest
+from schemas import HomeworkData,SaveAndAssignRequest,ThongBaoLopModel,DeleteHomeworkRequest,ChuDeModel,TuVungModel,BulkTuVungModel
 import json
+import io
 import datetime
 import random
 import re
@@ -554,5 +556,175 @@ async def delete_announcement(notice_id: int):
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã xóa thông báo thành công!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    
+
+
+@router.get("/get-topics/{id_giao_vien}")
+async def get_topics(id_giao_vien: int):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM chu_de_tu_vung WHERE id_giao_vien = %s ORDER BY id DESC", (id_giao_vien,))
+        topics = cursor.fetchall()
+        
+        for t in topics:
+            cursor.execute("SELECT COUNT(id) as total FROM tu_vung WHERE id_chu_de = %s", (t['id'],))
+            t['so_tu'] = cursor.fetchone()['total']
+            
+        conn.close()
+        return {"status": "success", "data": topics}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/add-topic")
+async def add_topic(req: ChuDeModel):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM chu_de_tu_vung WHERE chu_de = %s AND id_giao_vien = %s", (req.chu_de, req.id_giao_vien))
+        if cursor.fetchone():
+            return {"status": "error", "message": "Chủ đề này đã tồn tại!"}
+            
+        cursor.execute("INSERT INTO chu_de_tu_vung (chu_de, id_giao_vien) VALUES (%s, %s)", (req.chu_de, req.id_giao_vien))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "Đã tạo chủ đề mới!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/delete-topic/{id_chu_de}")
+async def delete_topic(id_chu_de: int, id_giao_vien: int):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM tu_vung WHERE id_chu_de = %s", (id_chu_de,))
+        if cursor.fetchone():
+            return {"status": "error", "message": "Không thể xóa! Vui lòng dọn sạch từ vựng bên trong trước."}
+            
+        cursor.execute("DELETE FROM chu_de_tu_vung WHERE id = %s AND id_giao_vien = %s", (id_chu_de, id_giao_vien))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "Đã xóa chủ đề!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.get("/get-vocab/{id_chu_de}")
+async def get_vocab(id_chu_de: int):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM tu_vung WHERE id_chu_de = %s ORDER BY id DESC", (id_chu_de,))
+        vocab = cursor.fetchall()
+        conn.close()
+        return {"status": "success", "data": vocab}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/add-vocab")
+async def add_vocab(req: TuVungModel):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM tu_vung WHERE tu = %s AND id_chu_de = %s AND id_giao_vien = %s", (req.tu, req.id_chu_de, req.id_giao_vien))
+        if cursor.fetchone():
+            return {"status": "error", "message": "Từ vựng đã có sẵn trong chủ đề này!"}
+            
+        cursor.execute("INSERT INTO tu_vung (id_giao_vien, id_chu_de, tu, phien_am, nghia, vi_du) VALUES (%s, %s, %s, %s, %s, %s)", 
+                      (req.id_giao_vien, req.id_chu_de, req.tu, req.phien_am, req.nghia, req.vi_du))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "Đã thêm từ vựng mới!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/update-vocab/{id_tu}")
+async def update_vocab(id_tu: int, req: TuVungModel):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM tu_vung WHERE tu = %s AND id_chu_de = %s AND id != %s", (req.tu, req.id_chu_de, id_tu))
+        if cursor.fetchone():
+            return {"status": "error", "message": "Từ vựng này đã tồn tại!"}
+            
+        cursor.execute("UPDATE tu_vung SET tu=%s, phien_am=%s, nghia=%s, vi_du=%s WHERE id=%s AND id_giao_vien=%s", 
+                      (req.tu, req.phien_am, req.nghia, req.vi_du, id_tu, req.id_giao_vien))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "Đã cập nhật từ vựng!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/delete-vocab/{id_tu}")
+async def delete_vocab(id_tu: int, id_giao_vien: int):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM tu_vung WHERE id = %s AND id_giao_vien = %s", (id_tu, id_giao_vien))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "Đã xóa từ vựng!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/bulk-add-vocab")
+async def bulk_add_vocab(req: BulkTuVungModel):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        success_count = 0
+        
+        for item in req.danh_sach_tu:
+            cursor.execute("SELECT id FROM tu_vung WHERE tu = %s AND id_chu_de = %s AND id_giao_vien = %s", (item.tu, req.id_chu_de, req.id_giao_vien))
+            if not cursor.fetchone():
+                cursor.execute("INSERT INTO tu_vung (id_giao_vien, id_chu_de, tu, phien_am, nghia, vi_du) VALUES (%s, %s, %s, %s, %s, %s)", 
+                              (req.id_giao_vien, req.id_chu_de, item.tu, item.phien_am, item.nghia, item.vi_du))
+                success_count += 1
+                
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": f"Đã nhập thành công {success_count} từ vựng từ Nova!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/extract-vocab-media")
+async def extract_vocabulary_media(file: UploadFile = File(None), text: str = Form(None)):
+    try:
+        if not file and not text:
+            return {"status": "error", "message": "Vui lòng tải lên ảnh hoặc nhập văn bản."}
+
+        contents = []
+        system_prompt = """Bạn là chuyên gia trích xuất dữ liệu. Hãy đọc hình ảnh hoặc dữ liệu bảng được cung cấp và trích xuất TOÀN BỘ danh sách từ vựng có trong đó.
+TRẢ VỀ ĐÚNG ĐỊNH DẠNG MẢNG JSON, bao gồm các key: "tu", "phien_am", "nghia", "vi_du".
+Bám sát chính xác dữ liệu gốc, không tự bịa thêm từ, không bỏ sót từ nào. Giữ nguyên định dạng gốc của từ (bao gồm cả loại từ như (n), (v) nếu có). Nếu trong ảnh/dữ liệu không có phiên âm hoặc ví dụ cụ thể, hãy để chuỗi rỗng "".
+Ví dụ: [{"tu": "Family (n)", "phien_am": "/ˈfæm.əl.i/", "nghia": "Gia đình", "vi_du": ""}]"""
+        
+        contents.append(system_prompt)
+
+        if file:
+            image_data = await file.read()
+            image = Image.open(io.BytesIO(image_data))
+            contents.append(image)
+        
+        if text:
+            contents.append(text)
+
+        model = genai.GenerativeModel(
+            'gemini-2.5-flash',
+            generation_config={"response_mime_type": "application/json"}
+        )
+        
+        response = await model.generate_content_async(contents)
+        raw_output = response.text.strip()
+
+        match = re.search(r'(\[.*\])', raw_output, re.DOTALL)
+        if match:
+            clean_json = match.group(1)
+            parsed_data = json.loads(clean_json)
+            return {"status": "success", "data": parsed_data}
+        else:
+            return {"status": "error", "message": "Nova không thể tạo cấu trúc JSON từ dữ liệu cung cấp."}
+
     except Exception as e:
         return {"status": "error", "message": str(e)}

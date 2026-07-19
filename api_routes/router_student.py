@@ -393,3 +393,63 @@ async def get_student_class_notices(acc_id: int):
         return {"status": "success", "data": notices}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+    
+
+
+# ==========================================
+# API HỌC SINH: LẤY DANH SÁCH CHỦ ĐỀ TỪ VỰNG CỦA GIÁO VIÊN MÌNH
+# ==========================================
+@router.get("/get-vocab-topics/{acc_id}")
+async def get_student_vocab_topics(acc_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        # Lấy id_giao_vien đang dạy học sinh này thông qua bảng lop_hoc
+        sql_get_gv = """
+            SELECT l.id_giao_vien 
+            FROM hoc_sinh h 
+            JOIN lop_hoc l ON h.id_lop = l.id 
+            WHERE h.id_tai_khoan = %s
+        """
+        cursor.execute(sql_get_gv, (acc_id,))
+        gv_info = cursor.fetchone()
+        
+        if not gv_info:
+            return {"status": "success", "data": []}
+            
+        id_giao_vien = gv_info['id_giao_vien']
+        
+        # Lấy tất cả chủ đề của giáo viên đó, kèm số lượng từ
+        sql_topics = """
+            SELECT c.id, c.chu_de, COUNT(t.id) as so_tu 
+            FROM chu_de_tu_vung c
+            LEFT JOIN tu_vung t ON c.id = t.id_chu_de
+            WHERE c.id_giao_vien = %s
+            GROUP BY c.id, c.chu_de
+            ORDER BY c.id DESC
+        """
+        cursor.execute(sql_topics, (id_giao_vien,))
+        topics = cursor.fetchall()
+        
+        db.close()
+        return {"status": "success", "data": topics}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ==========================================
+# API HỌC SINH: LẤY DANH SÁCH TỪ VỰNG TRONG 1 CHỦ ĐỀ
+# ==========================================
+@router.get("/get-vocab-list/{id_chu_de}")
+async def get_student_vocab_list(id_chu_de: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        cursor.execute("SELECT id, tu, phien_am, nghia, vi_du FROM tu_vung WHERE id_chu_de = %s ORDER BY id ASC", (id_chu_de,))
+        vocab_list = cursor.fetchall()
+        
+        db.close()
+        return {"status": "success", "data": vocab_list}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

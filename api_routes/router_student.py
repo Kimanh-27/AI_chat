@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 from database import get_db_connection
 from schemas import HistoryData, IIGSubmitData
 import json
@@ -543,3 +543,48 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
             "status": "error", 
             "message": "Đã xảy ra lỗi nghiêm trọng trong quá trình tạo đề."
         }
+    
+
+@router.get("/generate-matching")
+async def generate_matching(topic_id: int, limit: int = Query(5, le=15)):
+    try:
+        # 1. Gọi DB lấy từ vựng ngay trong API
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        # Sửa tên bảng/cột theo đúng database TOEIC của sếp
+        cursor.execute("SELECT tu_vung, nghia FROM tu_vung WHERE id_chu_de = %s", (topic_id,))
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            raise HTTPException(status_code=404, detail="Không tìm thấy từ vựng cho chủ đề này")
+
+        # 2. Ghép thành chuỗi gửi cho Nova
+        vocab_list = [f"{row['tu_vung']} ({row['nghia']})" for row in rows]
+        vocab_context = ", ".join(vocab_list)
+
+        # 3. Gọi Gemini 2.5 Flash
+        prompt = f"""
+        Bạn là Nova, hệ thống AI tạo bài tập TOEIC.
+        Dữ liệu:
+        {vocab_context}
+
+        Tạo {limit} cặp từ vựng ngẫu nhiên từ dữ liệu trên.
+        KHÔNG giải thích, KHÔNG định dạng markdown thừa.
+        Định dạng JSON ARRAY BẮT BUỘC:
+        [
+            {{"word": "Từ tiếng Anh 1", "meaning": "Nghĩa tiếng Việt 1"}},
+            {{"word": "Từ tiếng Anh 2", "meaning": "Nghĩa tiếng Việt 2"}}
+        ]
+        """
+
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt)
+        
+        cleaned_text = response.text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(cleaned_text)
+
+        return {"status": "success", "data": data}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

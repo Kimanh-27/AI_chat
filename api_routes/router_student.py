@@ -482,32 +482,25 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
         vocab_context = "\n".join([f"- {v['tu']}: {v['nghia']}" for v in vocab_list])
 
         prompt = f"""
-        Bạn là Nova, một hệ thống AI tạo đề thi tốc độ cao.
-        Tôi có danh sách từ vựng sau thuộc một chủ đề:
+        Bạn là Nova, một hệ thống AI tạo đề thi trắc nghiệm TOEIC.
+        Tôi có danh sách từ vựng sau:
         {vocab_context}
 
-        Nhiệm vụ: Tạo ra chính xác {limit} câu hỏi trắc nghiệm tiếng Anh. Sử dụng các từ trong danh sách trên làm câu hỏi hoặc đáp án đúng.
-        Các đáp án gây nhiễu (3 đáp án sai) phải được bạn tự phân tích, suy luận và tạo ra sao cho hợp lý, cùng trường từ vựng, không quá dễ đoán.
+        Nhiệm vụ: Tạo {limit} câu hỏi trắc nghiệm tiếng Anh.
         
-        Hãy chia đều các dạng câu hỏi sau:
-        - "Chọn nghĩa đúng của từ sau:"
-        - "Từ đồng nghĩa với từ sau là gì?"
-        - "Từ trái nghĩa với từ sau là gì?"
-        - "Đâu KHÔNG PHẢI là nghĩa của từ sau?"
+        Các dạng câu hỏi:
+        1. "Chọn nghĩa đúng của từ sau:"
+        2. "Từ đồng nghĩa với từ sau là gì?"
+        3. "Từ trái nghĩa với từ sau là gì?"
+        4. "Đâu KHÔNG PHẢI là nghĩa của từ sau?"
 
+        LƯU Ý SINH TỬ VỀ LOGIC: 
+        - TUYỆT ĐỐI KHÔNG sử dụng dạng câu "Từ trái nghĩa" cho các Danh từ chỉ người (father, mother, uncle,...), quan hệ gia đình, hoặc đồ vật cụ thể. Dạng "Từ trái nghĩa" CHỈ được dùng cho Tính từ hoặc Động từ!
+        - Nếu vi phạm logic ngôn ngữ cơ bản, hệ thống sẽ bị lỗi.
+        
         YÊU CẦU BẮT BUỘC:
-        1. Mỗi câu hỏi phải có 4 đáp án (1 đúng, 3 sai).
-        2. Trả về kết quả dưới định dạng mảng JSON (JSON ARRAY).
-        3. TUYỆT ĐỐI KHÔNG sử dụng block code markdown (như ```json hay ```). KHÔNG giải thích. KHÔNG nói lời thừa. 
-        4. Chỉ trả về một mảng bắt đầu bằng dấu [ và kết thúc bằng dấu ].
-
-        Cấu trúc chuẩn của một phần tử trong mảng:
-        {{
-            "type": "Dạng câu hỏi",
-            "question": "Nội dung từ vựng hoặc câu hỏi",
-            "options": ["Đáp án A", "Đáp án B", "Đáp án C", "Đáp án D"],
-            "answerIndex": 1
-        }}
+        - 4 đáp án (1 đúng, 3 sai). Trả về JSON ARRAY bắt đầu bằng [ và kết thúc bằng ].
+        - Cấu trúc: {{"type": "...", "question": "...", "options": ["..."], "answerIndex": 0}}
         """
 
         model = genai.GenerativeModel('gemini-2.5-flash')

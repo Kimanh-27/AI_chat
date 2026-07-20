@@ -593,6 +593,22 @@ async def add_topic(req: ChuDeModel):
         return {"status": "success", "message": "Đã tạo chủ đề mới!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+    
+@router.post("/update-topic/{id_chu_de}")
+async def update_topic(id_chu_de: int, req: ChuDeModel):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM chu_de_tu_vung WHERE chu_de = %s AND id_giao_vien = %s AND id != %s", (req.chu_de, req.id_giao_vien, id_chu_de))
+        if cursor.fetchone():
+            return {"status": "error", "message": "Tên chủ đề này đã tồn tại!"}
+            
+        cursor.execute("UPDATE chu_de_tu_vung SET chu_de = %s WHERE id = %s AND id_giao_vien = %s", (req.chu_de, id_chu_de, req.id_giao_vien))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "Đã cập nhật tên chủ đề!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @router.post("/delete-topic/{id_chu_de}")
 async def delete_topic(id_chu_de: int, id_giao_vien: int):

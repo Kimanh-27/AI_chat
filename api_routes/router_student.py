@@ -514,18 +514,11 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
         raw_text = re.sub(r"\s*```$", "", raw_text)
 
         quiz_data = json.loads(raw_text)
-
-        # ==========================================
-        # CHỈNH SỬA 2: THUẬT TOÁN XÁO TRỘN ĐÁP ÁN (CHỐNG BỆNH ĐÁP ÁN A)
-        # ==========================================
         for q in quiz_data:
-            # Lấy ra nội dung của đáp án đúng hiện tại
             correct_answer_text = q["options"][q["answerIndex"]]
             
-            # Xáo trộn ngẫu nhiên mảng 4 đáp án
             random.shuffle(q["options"])
             
-            # Cập nhật lại vị trí mới của đáp án đúng
             q["answerIndex"] = q["options"].index(correct_answer_text)
 
         return {"status": "success", "data": quiz_data}

@@ -1,8 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from database import get_db_connection
 from schemas import HistoryData, IIGSubmitData
 import json
+import re
+import os
+import google.generativeai as genai
 
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 router = APIRouter()
 
 
@@ -453,3 +457,81 @@ async def get_student_vocab_list(id_chu_de: int):
         return {"status": "success", "data": vocab_list}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+
+@router.get("/generate-quiz")
+async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        sql_query = "SELECT tu, nghia FROM tu_vung WHERE id_chu_de = %s"
+        cursor.execute(sql_query, (topic_id,))
+        vocab_list = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+
+        if not vocab_list or len(vocab_list) < 4:
+            return {
+                "status": "error", 
+                "message": "Chủ đề này có quá ít từ vựng. Cần ít nhất 4 từ để Nova trộn đáp án nhiễu!"
+            }
+
+        vocab_context = "\n".join([f"- {v['tu']}: {v['nghia']}" for v in vocab_list])
+
+        prompt = f"""
+        Bạn là Nova, một hệ thống AI tạo đề thi tốc độ cao.
+        Tôi có danh sách từ vựng sau thuộc một chủ đề:
+        {vocab_context}
+
+        Nhiệm vụ: Tạo ra chính xác {limit} câu hỏi trắc nghiệm tiếng Anh. Sử dụng các từ trong danh sách trên làm câu hỏi hoặc đáp án đúng.
+        Các đáp án gây nhiễu (3 đáp án sai) phải được bạn tự phân tích, suy luận và tạo ra sao cho hợp lý, cùng trường từ vựng, không quá dễ đoán.
+        
+        Hãy chia đều các dạng câu hỏi sau:
+        - "Chọn nghĩa đúng của từ sau:"
+        - "Từ đồng nghĩa với từ sau là gì?"
+        - "Từ trái nghĩa với từ sau là gì?"
+        - "Đâu KHÔNG PHẢI là nghĩa của từ sau?"
+
+        YÊU CẦU BẮT BUỘC:
+        1. Mỗi câu hỏi phải có 4 đáp án (1 đúng, 3 sai).
+        2. Trả về kết quả dưới định dạng mảng JSON (JSON ARRAY).
+        3. TUYỆT ĐỐI KHÔNG sử dụng block code markdown (như ```json hay ```). KHÔNG giải thích. KHÔNG nói lời thừa. 
+        4. Chỉ trả về một mảng bắt đầu bằng dấu [ và kết thúc bằng dấu ].
+
+        Cấu trúc chuẩn của một phần tử trong mảng:
+        {{
+            "type": "Dạng câu hỏi",
+            "question": "Nội dung từ vựng hoặc câu hỏi",
+            "options": ["Đáp án A", "Đáp án B", "Đáp án C", "Đáp án D"],
+            "answerIndex": 1
+        }}
+        """
+
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt)
+        
+        raw_text = response.text.strip()
+        
+        raw_text = re.sub(r"^```(json)?\s*", "", raw_text, flags=re.IGNORECASE)
+        raw_text = re.sub(r"\s*```$", "", raw_text)
+
+        quiz_data = json.loads(raw_text)
+
+        return {"status": "success", "data": quiz_data}
+
+    except json.JSONDecodeError as json_err:
+        print(f"[NOVA JSON ERROR] {json_err} \nRaw text: {raw_text}")
+        return {
+            "status": "error", 
+            "message": "Nova gặp vấn đề khi thiết lập ma trận đáp án. Vui lòng thử lại."
+        }
+        
+    except Exception as e:
+        print(f"[SYSTEM ERROR] Lỗi tạo quiz AI: {e}")
+        return {
+            "status": "error", 
+            "message": "Đã xảy ra lỗi nghiêm trọng trong quá trình tạo đề."
+        }

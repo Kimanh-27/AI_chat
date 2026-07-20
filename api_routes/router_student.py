@@ -489,20 +489,20 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
 
         Nhiệm vụ: Tạo {limit} câu hỏi trắc nghiệm tiếng Anh.
         
-        Các dạng câu hỏi:
+        Các dạng câu hỏi (sẽ đưa vào trường "type"):
         1. "Chọn nghĩa đúng của từ sau:"
         2. "Từ đồng nghĩa với từ sau là gì?"
         3. "Từ trái nghĩa với từ sau là gì?"
         4. "Đâu KHÔNG PHẢI là nghĩa của từ sau?"
 
-        LƯU Ý SINH TỬ VỀ LOGIC: 
+        LƯU Ý SINH TỬ VỀ LOGIC & NGÔN NGỮ: 
         - KHÔNG TRÙNG LẶP: Mỗi từ vựng CHỈ ĐƯỢC HỎI TỐI ĐA 1 LẦN. Không tạo 2 câu hỏi cho cùng 1 từ.
         - TUYỆT ĐỐI KHÔNG sử dụng dạng câu "Từ trái nghĩa" cho các Danh từ chỉ người (father, mother, uncle,...), quan hệ gia đình, hoặc đồ vật cụ thể. Dạng "Từ trái nghĩa" CHỈ được dùng cho Tính từ hoặc Động từ!
-        - Nếu vi phạm logic ngôn ngữ cơ bản, hệ thống sẽ bị lỗi.
+        - TRƯỜNG "question": CHỈ ĐƯỢC ĐIỀN ĐÚNG TỪ VỰNG TIẾNG ANH CẦN HỎI (Ví dụ: "Daughter"). TUYỆT ĐỐI KHÔNG tự ý chế thêm câu hỏi bằng tiếng Anh hay tiếng Việt nào khác vào trường này.
         
         YÊU CẦU BẮT BUỘC:
         - 4 đáp án (1 đúng, 3 sai). Trả về JSON ARRAY bắt đầu bằng [ và kết thúc bằng ].
-        - Cấu trúc: {{"type": "...", "question": "...", "options": ["..."], "answerIndex": 0}}
+        - Cấu trúc ví dụ CHUẨN: {{"type": "Chọn nghĩa đúng của từ sau:", "question": "Daughter", "options": ["Con gái", "Con trai", "Bố", "Mẹ"], "answerIndex": 0}}
         """
 
         model = genai.GenerativeModel('gemini-2.5-flash')

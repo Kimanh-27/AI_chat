@@ -4,6 +4,7 @@ from schemas import HistoryData, IIGSubmitData
 import json
 import re
 import os
+import random
 import google.generativeai as genai
 
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
@@ -473,10 +474,10 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
         cursor.close()
         conn.close()
 
-        if not vocab_list or len(vocab_list) < 4:
+        if not vocab_list or len(vocab_list) < limit:
             return {
                 "status": "error", 
-                "message": "Chủ đề này có quá ít từ vựng. Cần ít nhất 4 từ để Nova trộn đáp án nhiễu!"
+                "message": f"Chủ đề này có quá ít từ vựng. Cần ít nhất {limit} từ để Nova không bị lặp câu hỏi!"
             }
 
         vocab_context = "\n".join([f"- {v['tu']}: {v['nghia']}" for v in vocab_list])
@@ -495,6 +496,7 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
         4. "Đâu KHÔNG PHẢI là nghĩa của từ sau?"
 
         LƯU Ý SINH TỬ VỀ LOGIC: 
+        - KHÔNG TRÙNG LẶP: Mỗi từ vựng CHỈ ĐƯỢC HỎI TỐI ĐA 1 LẦN. Không tạo 2 câu hỏi cho cùng 1 từ.
         - TUYỆT ĐỐI KHÔNG sử dụng dạng câu "Từ trái nghĩa" cho các Danh từ chỉ người (father, mother, uncle,...), quan hệ gia đình, hoặc đồ vật cụ thể. Dạng "Từ trái nghĩa" CHỈ được dùng cho Tính từ hoặc Động từ!
         - Nếu vi phạm logic ngôn ngữ cơ bản, hệ thống sẽ bị lỗi.
         
@@ -512,6 +514,19 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
         raw_text = re.sub(r"\s*```$", "", raw_text)
 
         quiz_data = json.loads(raw_text)
+
+        # ==========================================
+        # CHỈNH SỬA 2: THUẬT TOÁN XÁO TRỘN ĐÁP ÁN (CHỐNG BỆNH ĐÁP ÁN A)
+        # ==========================================
+        for q in quiz_data:
+            # Lấy ra nội dung của đáp án đúng hiện tại
+            correct_answer_text = q["options"][q["answerIndex"]]
+            
+            # Xáo trộn ngẫu nhiên mảng 4 đáp án
+            random.shuffle(q["options"])
+            
+            # Cập nhật lại vị trí mới của đáp án đúng
+            q["answerIndex"] = q["options"].index(correct_answer_text)
 
         return {"status": "success", "data": quiz_data}
 

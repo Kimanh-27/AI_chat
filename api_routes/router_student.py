@@ -548,22 +548,18 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
 @router.get("/generate-matching")
 async def generate_matching(topic_id: int, limit: int = Query(5, le=15)):
     try:
-        # 1. Gọi DB lấy từ vựng ngay trong API
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        # Sửa tên bảng/cột theo đúng database TOEIC của sếp
-        cursor.execute("SELECT tu_vung, nghia FROM tu_vung WHERE id_chu_de = %s", (topic_id,))
+        cursor.execute("SELECT tu, nghia FROM tu_vung WHERE id_chu_de = %s", (topic_id,))
         rows = cursor.fetchall()
         conn.close()
 
         if not rows:
             raise HTTPException(status_code=404, detail="Không tìm thấy từ vựng cho chủ đề này")
 
-        # 2. Ghép thành chuỗi gửi cho Nova
-        vocab_list = [f"{row['tu_vung']} ({row['nghia']})" for row in rows]
+        vocab_list = [f"{row['tu']} ({row['nghia']})" for row in rows]
         vocab_context = ", ".join(vocab_list)
 
-        # 3. Gọi Gemini 2.5 Flash
         prompt = f"""
         Bạn là Nova, hệ thống AI tạo bài tập TOEIC.
         Dữ liệu:

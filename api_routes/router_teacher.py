@@ -615,10 +615,7 @@ async def delete_topic(id_chu_de: int, id_giao_vien: int):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM tu_vung WHERE id_chu_de = %s", (id_chu_de,))
-        if cursor.fetchone():
-            return {"status": "error", "message": "Không thể xóa! Vui lòng dọn sạch từ vựng bên trong trước."}
-            
+        cursor.execute("DELETE FROM tu_vung WHERE id_chu_de = %s", (id_chu_de,))
         cursor.execute("DELETE FROM chu_de_tu_vung WHERE id = %s AND id_giao_vien = %s", (id_chu_de, id_giao_vien))
         conn.commit()
         conn.close()

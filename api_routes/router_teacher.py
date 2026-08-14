@@ -40,21 +40,26 @@ async def get_class_statistics(id_lop: int):
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
+        # 1. Overview
         cursor.execute("""
             SELECT 
                 COUNT(DISTINCT h.id) as total_students,
                 COUNT(l.id) as total_tests,
-                SUM(l.diem_so) as total_correct,
-                SUM(l.tong_so_cau) as total_questions
+                IFNULL(SUM(l.diem_so), 0) as total_correct,
+                IFNULL(SUM(l.tong_so_cau), 0) as total_questions
             FROM chi_tiet_lop_hoc c
-            JOIN hoc_sinh h ON c.id_hoc_sinh = h.id_tai_khoan
+            LEFT JOIN hoc_sinh h ON c.id_hoc_sinh = h.id_tai_khoan
             LEFT JOIN lich_su_lam_bai l ON h.id_tai_khoan = l.id_hoc_sinh
             WHERE c.id_lop = %s
         """, (id_lop,))
         overview = cursor.fetchone()
+        
+        if not overview:
+            overview = {"total_students": 0, "total_tests": 0, "total_correct": 0, "total_questions": 0}
 
+        # 2. Thống kê theo Part
         cursor.execute("""
-            SELECT l.part, SUM(l.diem_so) as total_correct, SUM(l.tong_so_cau) as total_questions
+            SELECT l.part, IFNULL(SUM(l.diem_so), 0) as total_correct, IFNULL(SUM(l.tong_so_cau), 0) as total_questions
             FROM lich_su_lam_bai l
             JOIN chi_tiet_lop_hoc c ON l.id_hoc_sinh = c.id_hoc_sinh
             WHERE c.id_lop = %s
@@ -63,6 +68,7 @@ async def get_class_statistics(id_lop: int):
         """, (id_lop,))
         part_stats = cursor.fetchall()
 
+        # 3. Hoạt động gần đây
         cursor.execute("""
             SELECT h.ten_hoc_sinh, l.part, l.diem_so, l.tong_so_cau, l.thoi_gian_nop 
             FROM lich_su_lam_bai l
@@ -70,6 +76,7 @@ async def get_class_statistics(id_lop: int):
             JOIN chi_tiet_lop_hoc c ON h.id_tai_khoan = c.id_hoc_sinh
             WHERE c.id_lop = %s
             ORDER BY l.thoi_gian_nop DESC 
+            LIMIT 50
         """, (id_lop,))
         recent_activities = cursor.fetchall()
 

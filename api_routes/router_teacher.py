@@ -46,17 +46,18 @@ async def get_class_statistics(id_lop: int):
                 COUNT(l.id) as total_tests,
                 SUM(l.diem_so) as total_correct,
                 SUM(l.tong_so_cau) as total_questions
-            FROM hoc_sinh h
+            FROM chi_tiet_lop_hoc c
+            JOIN hoc_sinh h ON c.id_hoc_sinh = h.id_tai_khoan
             LEFT JOIN lich_su_lam_bai l ON h.id_tai_khoan = l.id_hoc_sinh
-            WHERE h.id_lop = %s
+            WHERE c.id_lop = %s
         """, (id_lop,))
         overview = cursor.fetchone()
 
         cursor.execute("""
             SELECT l.part, SUM(l.diem_so) as total_correct, SUM(l.tong_so_cau) as total_questions
             FROM lich_su_lam_bai l
-            JOIN hoc_sinh h ON l.id_hoc_sinh = h.id_tai_khoan
-            WHERE h.id_lop = %s
+            JOIN chi_tiet_lop_hoc c ON l.id_hoc_sinh = c.id_hoc_sinh
+            WHERE c.id_lop = %s
             GROUP BY l.part
             ORDER BY l.part ASC
         """, (id_lop,))
@@ -66,7 +67,8 @@ async def get_class_statistics(id_lop: int):
             SELECT h.ten_hoc_sinh, l.part, l.diem_so, l.tong_so_cau, l.thoi_gian_nop 
             FROM lich_su_lam_bai l
             JOIN hoc_sinh h ON l.id_hoc_sinh = h.id_tai_khoan
-            WHERE h.id_lop = %s
+            JOIN chi_tiet_lop_hoc c ON h.id_tai_khoan = c.id_hoc_sinh
+            WHERE c.id_lop = %s
             ORDER BY l.thoi_gian_nop DESC 
         """, (id_lop,))
         recent_activities = cursor.fetchall()

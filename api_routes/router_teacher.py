@@ -2,18 +2,23 @@ from fastapi import APIRouter, UploadFile, File, Form
 from PIL import Image
 from database import get_db_connection
 from fastapi import APIRouter,Form
-from schemas import HomeworkData,SaveAndAssignRequest,ThongBaoLopModel,DeleteHomeworkRequest,ChuDeModel,TuVungModel,BulkTuVungModel
+from schemas import HomeworkData,SaveAndAssignRequest,ThongBaoLopModel,DeleteHomeworkRequest,ChuDeModel,TuVungModel,BulkTuVungModel, TaiLieuHocModel
 import json
-import io
+import os
+import uuid 
 import datetime
 import random
 import re
 from prompts import TOEIC_CONFIG
 import google.generativeai as genai
-
+import pymupdf as fitz
+import io
 
 router = APIRouter()
-
+# HÀM LOG NHANH DÙNG CHUNG BÊN TRONG FILE router_teacher.py
+def log_teacher_activity(cursor, id_gv, action, detail=""):
+    sql = "INSERT INTO lich_su_hoat_dong_gv (id_giao_vien, hanh_dong, chi_tiet) VALUES (%s, %s, %s)"
+    cursor.execute(sql, (id_gv, action, detail))
 #=============================================================
 #===      GIÁO VIÊN THỐNG KÊ PHÂN TÍCH THEO LỚP     ==========
 #=============================================================
@@ -318,7 +323,7 @@ async def evaluate_student_performance(id_hoc_sinh: int):
 
         db.close()
 
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-3')
         
         if not weak_parts:
             prompt = """Bạn là chuyên gia phân tích Giáo dục. Học sinh này có tất cả các kỹ năng đều đạt trên 50%, biểu hiện rất xuất sắc.
@@ -420,7 +425,7 @@ async def generate_remedial(part: str = Form(...), num_items: int = Form(...), f
         final_prompt = system_prompt + remedial_rule
 
         model = genai.GenerativeModel(
-                'gemini-2.5-flash',
+                'gemini-3.6-flash',
                 generation_config={"response_mime_type": "application/json"}
             )
         response = await model.generate_content_async(final_prompt)
@@ -561,6 +566,10 @@ async def delete_announcement(notice_id: int):
     
 
 
+# =============================================================
+# QUẢN LÝ TỪ VỰNG & CHỦ ĐỀ (CÓ BẮN LOG HOẠT ĐỘNG VỀ ADMIN)
+# =============================================================
+
 @router.get("/get-topics/{id_giao_vien}")
 async def get_topics(id_giao_vien: int):
     try:
@@ -588,12 +597,16 @@ async def add_topic(req: ChuDeModel):
             return {"status": "error", "message": "Chủ đề này đã tồn tại!"}
             
         cursor.execute("INSERT INTO chu_de_tu_vung (chu_de, id_giao_vien) VALUES (%s, %s)", (req.chu_de, req.id_giao_vien))
+        
+        # BẮN LOG TẠO CHỦ ĐỀ
+        log_teacher_activity(cursor, req.id_giao_vien, "Tạo chủ đề từ vựng", f"Tên chủ đề: {req.chu_de}")
+        
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã tạo chủ đề mới!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
-    
+
 @router.post("/update-topic/{id_chu_de}")
 async def update_topic(id_chu_de: int, req: ChuDeModel):
     try:
@@ -604,6 +617,10 @@ async def update_topic(id_chu_de: int, req: ChuDeModel):
             return {"status": "error", "message": "Tên chủ đề này đã tồn tại!"}
             
         cursor.execute("UPDATE chu_de_tu_vung SET chu_de = %s WHERE id = %s AND id_giao_vien = %s", (req.chu_de, id_chu_de, req.id_giao_vien))
+        
+        # BẮN LOG SỬA CHỦ ĐỀ
+        log_teacher_activity(cursor, req.id_giao_vien, "Cập nhật tên chủ đề", f"Tên mới: {req.chu_de}")
+        
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã cập nhật tên chủ đề!"}
@@ -617,6 +634,10 @@ async def delete_topic(id_chu_de: int, id_giao_vien: int):
         cursor = conn.cursor()
         cursor.execute("DELETE FROM tu_vung WHERE id_chu_de = %s", (id_chu_de,))
         cursor.execute("DELETE FROM chu_de_tu_vung WHERE id = %s AND id_giao_vien = %s", (id_chu_de, id_giao_vien))
+        
+        # BẮN LOG XÓA CHỦ ĐỀ
+        log_teacher_activity(cursor, id_giao_vien, "Xóa chủ đề từ vựng", f"ID chủ đề: #{id_chu_de}")
+        
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã xóa chủ đề!"}
@@ -646,6 +667,10 @@ async def add_vocab(req: TuVungModel):
             
         cursor.execute("INSERT INTO tu_vung (id_giao_vien, id_chu_de, tu, phien_am, nghia, vi_du) VALUES (%s, %s, %s, %s, %s, %s)", 
                       (req.id_giao_vien, req.id_chu_de, req.tu, req.phien_am, req.nghia, req.vi_du))
+        
+        # BẮN LOG THÊM TỪ VỰNG
+        log_teacher_activity(cursor, req.id_giao_vien, "Thêm từ vựng mới", f"Từ: '{req.tu}' ({req.nghia})")
+        
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã thêm từ vựng mới!"}
@@ -663,6 +688,10 @@ async def update_vocab(id_tu: int, req: TuVungModel):
             
         cursor.execute("UPDATE tu_vung SET tu=%s, phien_am=%s, nghia=%s, vi_du=%s WHERE id=%s AND id_giao_vien=%s", 
                       (req.tu, req.phien_am, req.nghia, req.vi_du, id_tu, req.id_giao_vien))
+        
+        # BẮN LOG CẬP NHẬT TỪ VỰNG
+        log_teacher_activity(cursor, req.id_giao_vien, "Cập nhật từ vựng", f"Từ: '{req.tu}'")
+        
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã cập nhật từ vựng!"}
@@ -675,6 +704,10 @@ async def delete_vocab(id_tu: int, id_giao_vien: int):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM tu_vung WHERE id = %s AND id_giao_vien = %s", (id_tu, id_giao_vien))
+        
+        # BẮN LOG XÓA TỪ VỰNG
+        log_teacher_activity(cursor, id_giao_vien, "Xóa từ vựng", f"ID từ vựng: #{id_tu}")
+        
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã xóa từ vựng!"}
@@ -695,12 +728,16 @@ async def bulk_add_vocab(req: BulkTuVungModel):
                               (req.id_giao_vien, req.id_chu_de, item.tu, item.phien_am, item.nghia, item.vi_du))
                 success_count += 1
                 
+        # BẮN LOG THÊM HÀNG LOẠT BẰNG AI
+        if success_count > 0:
+            log_teacher_activity(cursor, req.id_giao_vien, "Trích xuất từ vựng AI", f"Thêm thành công {success_count} từ vựng vào kho")
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": f"Đã nhập thành công {success_count} từ vựng từ Nova!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
+        
 @router.post("/extract-vocab-media")
 async def extract_vocabulary_media(file: UploadFile = File(None), text: str = Form(None)):
     try:
@@ -724,7 +761,7 @@ Ví dụ: [{"tu": "Family (n)", "phien_am": "/ˈfæm.əl.i/", "nghia": "Gia đì
             contents.append(text)
 
         model = genai.GenerativeModel(
-            'gemini-2.5-flash',
+            'gemini-3.6-flash',
             generation_config={"response_mime_type": "application/json"}
         )
         
@@ -739,5 +776,203 @@ Ví dụ: [{"tu": "Family (n)", "phien_am": "/ˈfæm.əl.i/", "nghia": "Gia đì
         else:
             return {"status": "error", "message": "Nova không thể tạo cấu trúc JSON từ dữ liệu cung cấp."}
 
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+        
+# =============================================================
+# API LẤY STATS CHO DASHBOARD GIÁO VIÊN
+# =============================================================
+@router.get("/dashboard-stats/{id_giao_vien}")
+async def get_teacher_dashboard_stats(id_giao_vien: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        cursor.execute("SELECT COUNT(*) as total FROM lop_hoc WHERE id_giao_vien = %s", (id_giao_vien,))
+        tong_lop = cursor.fetchone()['total']
+        
+        cursor.execute("""
+            SELECT COUNT(DISTINCT h.id) as total 
+            FROM hoc_sinh h 
+            JOIN lop_hoc l ON h.id_lop = l.id 
+            WHERE l.id_giao_vien = %s
+        """, (id_giao_vien,))
+        tong_hoc_sinh = cursor.fetchone()['total']
+        
+        cursor.execute("SELECT COUNT(*) as total FROM ngan_hang_cau_hoi WHERE id_giao_vien = %s", (id_giao_vien,))
+        tong_cau_hoi = cursor.fetchone()['total']
+        
+        cursor.execute("SELECT COUNT(*) as total FROM tu_vung WHERE id_giao_vien = %s", (id_giao_vien,))
+        tong_tu_vung = cursor.fetchone()['total']
+        
+        db.close()
+        return {
+            "status": "success", 
+            "data": {
+                "tong_lop": tong_lop,
+                "tong_hoc_sinh": tong_hoc_sinh,
+                "tong_cau_hoi": tong_cau_hoi,
+                "tong_tu_vung": tong_tu_vung
+            }
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+        # =========================================================================
+# QUẢN LÝ TÀI LIỆU HỌC TẬP (DÀNH CHO GIÁO VIÊN)
+# =========================================================================
+from schemas import TaiLieuHocModel
+
+@router.get("/get-all-grammar-docs")
+async def get_all_grammar_docs():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, ngay_tao FROM tai_lieu_hoc ORDER BY id DESC")
+        docs = cursor.fetchall()
+        db.close()
+        return {"status": "success", "data": docs}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.get("/get-grammar-doc/{doc_id}")
+async def get_grammar_doc(doc_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+        doc = cursor.fetchone()
+        db.close()
+        return {"status": "success", "data": doc} if doc else {"status": "error", "message": "Không tìm thấy!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/save-grammar-doc")
+async def save_grammar_doc(doc: TaiLieuHocModel):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        if doc.id:
+            sql = "UPDATE tai_lieu_hoc SET tieu_de=%s, loai_tai_lieu=%s, tags=%s, noi_dung=%s, file_goc=%s WHERE id=%s"
+            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.id))
+        else:
+            sql = "INSERT INTO tai_lieu_hoc (tieu_de, loai_tai_lieu, tags, noi_dung, file_goc) VALUES (%s, %s, %s, %s, %s)"
+            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc))
+        db.commit()
+        db.close()
+        return {"status": "success", "message": "Đã lưu tài liệu thành công!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/delete-grammar-doc/{doc_id}")
+async def delete_grammar_doc(doc_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        cursor.execute("DELETE FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+        db.commit()
+        db.close()
+        return {"status": "success", "message": "Đã xóa tài liệu!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/extract-document-ai")
+async def extract_document_ai(file: UploadFile = File(...)):
+    try:
+        goc_dir = "uploads/tai_lieu_goc"
+        ext_dir = "uploads/extracted_docs"
+        os.makedirs(goc_dir, exist_ok=True)
+        os.makedirs(ext_dir, exist_ok=True)
+        
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        file_id = uuid.uuid4().hex
+        
+        saved_filename = f"{file_id}{file_ext}"
+        saved_filepath = os.path.join(goc_dir, saved_filename)
+        with open(saved_filepath, "wb") as buffer:
+            buffer.write(await file.read())
+            
+        file_goc_url = f"http://127.0.0.1:80/ai_local/AI_chat/uploads/tai_lieu_goc/{saved_filename}"
+        raw_html = ""
+
+        if file_ext == '.pdf':
+            doc = fitz.open(saved_filepath)
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                blocks = page.get_text("dict").get("blocks", [])
+                blocks.sort(key=lambda b: (round(b.get("bbox", [0,0,0,0])[1] / 10), b.get("bbox", [0,0,0,0])[0]))
+                
+                for b in blocks:
+                    if b.get('type') == 0:
+                        text = " ".join([span.get("text", "") for line in b.get("lines", []) for span in line.get("spans", [])])
+                        if text.strip(): raw_html += f"<p>{text.strip()}</p>\n"
+                    elif b.get('type') == 1:
+                        img_bytes = b.get("image")
+                        if img_bytes and len(img_bytes) > 2048:
+                            img_name = f"ext_{uuid.uuid4().hex}.png"
+                            with open(os.path.join(ext_dir, img_name), "wb") as img_file:
+                                img_file.write(img_bytes)
+                            img_url = f"http://127.0.0.1:80/ai_local/AI_chat/uploads/extracted_docs/{img_name}"
+                            raw_html += f'<div style="text-align:center; margin:15px 0;"><img src="{img_url}" style="max-width:100%; border-radius:8px;"></div>\n'
+            doc.close()
+        elif file_ext in ['.png', '.jpg', '.jpeg']:
+            model = genai.GenerativeModel('gemini-3.6-flash')
+            with open(saved_filepath, "rb") as f:
+                image_parts = [{"mime_type": file.content_type, "data": f.read()}]
+            response = await model.generate_content_async([
+                image_parts[0], "OCR chính xác nội dung chữ trong ảnh, định dạng HTML cơ bản. Không tự sáng tác thêm."
+            ])
+            raw_html = response.text.replace("```html", "").replace("```", "").strip()
+        else:
+            return {"status": "error", "message": "Chỉ hỗ trợ PDF hoặc Hình ảnh."}
+
+        if raw_html:
+            prompt = f"Cấu trúc lại HTML thô thành bài giảng đẹp mắt (Dùng <h3>, <ul>, <li>). GIỮ NGUYÊN 100% các thẻ <img src=\"...\">. Chỉ trả về HTML sạch.\n[HTML THÔ]\n{raw_html}"
+            model = genai.GenerativeModel('gemini-3.6-flash')
+            response = await model.generate_content_async(prompt)
+            return {"status": "success", "data": response.text.replace("```html", "").replace("```", "").strip(), "file_goc": file_goc_url}
+
+        return {"status": "error", "message": "Không có nội dung."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/upload-document-only")
+async def upload_document_only(file: UploadFile = File(...)):
+    try:
+        goc_dir = "uploads/tai_lieu_goc"
+        os.makedirs(goc_dir, exist_ok=True)
+        
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        file_id = uuid.uuid4().hex
+        
+        saved_filename = f"{file_id}{file_ext}"
+        saved_filepath = os.path.join(goc_dir, saved_filename)
+        with open(saved_filepath, "wb") as buffer:
+            buffer.write(await file.read())
+            
+        file_goc_url = f"http://127.0.0.1:80/ai_local/AI_chat/uploads/tai_lieu_goc/{saved_filename}"
+        
+        return {"status": "success", "file_goc": file_goc_url}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.get("/doc-view-history/{id_lop}")
+async def get_doc_view_history(id_lop: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        sql = """
+            SELECT h.ten_hoc_sinh, t.tieu_de, t.loai_tai_lieu, x.thoi_gian_xem
+            FROM lich_su_xem_tai_lieu x
+            JOIN hoc_sinh h ON x.id_hoc_sinh = h.id_tai_khoan
+            JOIN tai_lieu_hoc t ON x.id_tai_lieu = t.id
+            WHERE h.id_lop = %s
+            ORDER BY x.thoi_gian_xem DESC LIMIT 50
+        """
+        cursor.execute(sql, (id_lop,))
+        history = cursor.fetchall()
+        db.close()
+        return {"status": "success", "data": history}
     except Exception as e:
         return {"status": "error", "message": str(e)}

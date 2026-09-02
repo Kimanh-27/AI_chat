@@ -137,3 +137,14 @@ class BulkTuVungModel(BaseModel):
     id_chu_de: int
     id_giao_vien: int
     danh_sach_tu: List[TuVungModel]
+
+# =============================================================
+# MODEL DỮ LIỆU CHO API QUẢN LÝ TÀI LIỆU HỌC (NGỮ PHÁP)
+# =============================================================
+class TaiLieuHocModel(BaseModel):
+    id: Optional[int] = None
+    tieu_de: str
+    loai_tai_lieu: str 
+    tags: str          
+    noi_dung: str
+    file_goc: Optional[str] = None

@@ -6,10 +6,12 @@ import re
 import random
 import os
 from datetime import datetime
-from schemas import UpdateAnswersModel, AccountModel, ClassModel, UpdateProfileModel
+from schemas import UpdateAnswersModel, AccountModel, ClassModel, UpdateProfileModel, TaiLieuHocModel
 import bcrypt  
 from typing import Optional
-
+import pymupdf as fitz  # PyMuPDF
+import google.generativeai as genai
+import datetime
 router = APIRouter()
 
 def hash_password(password: str) -> str:
@@ -703,5 +705,412 @@ async def user_update_profile(acc_id: int, req: UpdateProfileModel):
         db.commit()
         db.close()
         return {"status": "success", "message": "Cập nhật thông tin cá nhân thành công!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# =========================================================================
+# API ADMIN: BÓC TÁCH PDF/ẢNH BẰNG AI & PYMUPDF (FIX LỖI KEYERROR)
+# =========================================================================
+@router.post("/extract-document-ai")
+async def extract_document_ai(file: UploadFile = File(...)):
+    try:
+        goc_dir = "uploads/tai_lieu_goc"
+        ext_dir = "uploads/extracted_docs"
+        os.makedirs(goc_dir, exist_ok=True)
+        os.makedirs(ext_dir, exist_ok=True)
+        
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        file_id = uuid.uuid4().hex
+        
+        # 1. LƯU FILE GỐC
+        saved_filename = f"{file_id}{file_ext}"
+        saved_filepath = os.path.join(goc_dir, saved_filename)
+        with open(saved_filepath, "wb") as buffer:
+            buffer.write(await file.read())
+            
+        file_goc_url = f"http://127.0.0.1:80/ai_local/AI_chat/uploads/tai_lieu_goc/{saved_filename}"
+        raw_html = ""
+
+        # 2. RÃ PDF LẤY CHỮ VÀ ẢNH
+        if file_ext == '.pdf':
+            doc = fitz.open(saved_filepath)
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                blocks = page.get_text("dict").get("blocks", [])
+                blocks.sort(key=lambda b: (round(b.get("bbox", [0,0,0,0])[1] / 10), b.get("bbox", [0,0,0,0])[0]))
+                
+                for b in blocks:
+                    if b.get('type') == 0:
+                        text = " ".join([span.get("text", "") for line in b.get("lines", []) for span in line.get("spans", [])])
+                        if text.strip(): raw_html += f"<p>{text.strip()}</p>\n"
+                    elif b.get('type') == 1:
+                        img_bytes = b.get("image")
+                        if img_bytes and len(img_bytes) > 2048:
+                            img_name = f"ext_{uuid.uuid4().hex}.png"
+                            with open(os.path.join(ext_dir, img_name), "wb") as img_file:
+                                img_file.write(img_bytes)
+                            img_url = f"http://127.0.0.1:80/ai_local/AI_chat/uploads/extracted_docs/{img_name}"
+                            raw_html += f'<div style="text-align:center; margin:15px 0;"><img src="{img_url}" style="max-width:100%; border-radius:8px;"></div>\n'
+            doc.close()
+
+        # 3. RÃ ẢNH LẤY CHỮ
+        elif file_ext in ['.png', '.jpg', '.jpeg']:
+            model = genai.GenerativeModel('gemini-3.6-flash')
+            with open(saved_filepath, "rb") as f:
+                image_parts = [{"mime_type": file.content_type, "data": f.read()}]
+            response = await model.generate_content_async([
+                image_parts[0], 
+                "OCR chính xác 100% nội dung chữ trong ảnh, định dạng HTML cơ bản. Không tự sáng tác thêm."
+            ])
+            raw_html = response.text.replace("```html", "").replace("```", "").strip()
+        else:
+            return {"status": "error", "message": "Chỉ hỗ trợ PDF hoặc Hình ảnh."}
+
+        # 4. AI LÀM ĐẸP (POLISH) TRƯỚC KHI TRẢ VỀ
+        if raw_html:
+            prompt = f"""
+            Dưới đây là HTML thô bóc tách từ tài liệu. Hãy định dạng lại thành một bài giảng tiếng Anh siêu đẹp, dễ đọc (Dùng <h3>, <ul>, <li>, in đậm).
+            LỆNH TUYỆT ĐỐI BẮT BUỘC: 
+            1. GIỮ NGUYÊN 100% các thẻ <img src="..."> và vị trí của chúng. KHÔNG tự tạo link ảnh ảo.
+            2. Xóa các ký tự rác, nối các câu bị ngắt dòng sai.
+            Chỉ trả về HTML sạch.
+            [HTML THÔ]
+            {raw_html}
+            """
+            model = genai.GenerativeModel('gemini-3.6-flash')
+            response = await model.generate_content_async(prompt)
+            clean_html = response.text.replace("```html", "").replace("```", "").strip()
+            return {"status": "success", "data": clean_html, "file_goc": file_goc_url}
+
+        return {"status": "error", "message": "Không có nội dung bóc tách."}
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "message": f"Lỗi Backend: {str(e)}"}
+
+@router.get("/get-all-grammar-docs")
+async def get_all_grammar_docs():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, ngay_tao FROM tai_lieu_hoc ORDER BY id DESC")
+        docs = cursor.fetchall()
+        db.close()
+        return {"status": "success", "data": docs}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.get("/get-grammar-doc/{doc_id}")
+async def get_grammar_doc(doc_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+        doc = cursor.fetchone()
+        db.close()
+        return {"status": "success", "data": doc} if doc else {"status": "error", "message": "Không tìm thấy!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/save-grammar-doc")
+async def save_grammar_doc(doc: TaiLieuHocModel):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        if doc.id:
+            sql = "UPDATE tai_lieu_hoc SET tieu_de=%s, loai_tai_lieu=%s, tags=%s, noi_dung=%s, file_goc=%s WHERE id=%s"
+            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.id))
+        else:
+            sql = "INSERT INTO tai_lieu_hoc (tieu_de, loai_tai_lieu, tags, noi_dung, file_goc) VALUES (%s, %s, %s, %s, %s)"
+            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc))
+        db.commit()
+        db.close()
+        return {"status": "success", "message": "Đã lưu tài liệu thành công!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/delete-grammar-doc/{doc_id}")
+async def delete_grammar_doc(doc_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        cursor.execute("DELETE FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+        db.commit()
+        db.close()
+        return {"status": "success", "message": "Đã xóa tài liệu!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+# =========================================================================
+# API ADMIN: QUẢN LÝ TÀI LIỆU HỌC (CRUD DB)
+# =========================================================================
+
+@router.get("/get-all-grammar-docs")
+async def get_all_grammar_docs():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        # BỔ SUNG THÊM 'noi_dung' VÀO CÂU LỆNH SELECT Ở ĐÂY 👇
+        cursor.execute("SELECT id, tieu_de, loai_tai_lieu, tags, noi_dung, ngay_tao FROM tai_lieu_hoc ORDER BY id DESC")
+        
+        docs = cursor.fetchall()
+        db.close()
+        return {"status": "success", "data": docs}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+@router.get("/get-grammar-doc/{doc_id}")
+async def get_grammar_doc(doc_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+        doc = cursor.fetchone()
+        db.close()
+        if doc:
+            return {"status": "success", "data": doc}
+        return {"status": "error", "message": "Không tìm thấy tài liệu!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/save-grammar-doc")
+async def save_grammar_doc(doc: TaiLieuHocModel):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        if doc.id:
+            sql = """UPDATE tai_lieu_hoc 
+                     SET tieu_de=%s, loai_tai_lieu=%s, tags=%s, noi_dung=%s 
+                     WHERE id=%s"""
+            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.id))
+            msg = "Đã cập nhật tài liệu thành công!"
+        else:
+            sql = """INSERT INTO tai_lieu_hoc (tieu_de, loai_tai_lieu, tags, noi_dung) 
+                     VALUES (%s, %s, %s, %s)"""
+            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung))
+            msg = "Đã tạo tài liệu mới thành công!"
+        db.commit()
+        db.close()
+        return {"status": "success", "message": msg}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/delete-grammar-doc/{doc_id}")
+async def delete_grammar_doc(doc_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        cursor.execute("DELETE FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+        db.commit()
+        db.close()
+        return {"status": "success", "message": "Đã xóa tài liệu khỏi hệ thống!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# =========================================================================
+# API ADMIN: Dashboard ADMIN   
+# =========================================================================
+@router.get("/dashboard-stats")
+async def get_admin_dashboard_stats():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        # 4 Chỉ số đếm (Scorecards)
+        cursor.execute("SELECT COUNT(*) as total FROM tai_khoan WHERE vai_tro = 'student'")
+        tong_hoc_sinh = cursor.fetchone()['total']
+        
+        cursor.execute("SELECT COUNT(*) as total FROM tai_khoan WHERE vai_tro = 'teacher'")
+        tong_giao_vien = cursor.fetchone()['total']
+        
+        cursor.execute("SELECT COUNT(*) as total FROM tai_lieu_hoc")
+        tong_tai_lieu = cursor.fetchone()['total']
+        
+        cursor.execute("SELECT COUNT(*) as total FROM lich_su_lam_bai")
+        tong_luot_lam_bai = cursor.fetchone()['total']
+
+        # DỮ LIỆU BIỂU ĐỒ TRÒN (PIE CHART) - Tỉ lệ tài liệu
+        cursor.execute("SELECT loai_tai_lieu, COUNT(*) as count FROM tai_lieu_hoc GROUP BY loai_tai_lieu")
+        doc_types_raw = cursor.fetchall()
+        doc_types = {'general': 0, 'toeic_prep': 0}
+        for d in doc_types_raw:
+            if d['loai_tai_lieu'] == 'general': doc_types['general'] = d['count']
+            elif d['loai_tai_lieu'] == 'toeic_prep': doc_types['toeic_prep'] = d['count']
+
+        # DỮ LIỆU BIỂU ĐỒ CỘT (BAR CHART) - Hoạt động 7 ngày qua
+        today = datetime.date.today()
+        # Tạo sẵn mảng 7 ngày để tránh bị khuyết ngày không có ai nộp bài
+        last_7_days = [(today - datetime.timedelta(days=i)).strftime('%Y-%m-%d') for i in range(6, -1, -1)]
+        weekly_activity = {day: 0 for day in last_7_days}
+
+        cursor.execute("""
+            SELECT DATE(thoi_gian_nop) as date_nop, COUNT(*) as count 
+            FROM lich_su_lam_bai 
+            WHERE thoi_gian_nop >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+            GROUP BY DATE(thoi_gian_nop)
+        """)
+        activity_raw = cursor.fetchall()
+        for a in activity_raw:
+            day_str = a['date_nop'].strftime('%Y-%m-%d')
+            if day_str in weekly_activity:
+                weekly_activity[day_str] = a['count']
+        
+        db.close()
+        return {
+            "status": "success", 
+            "data": {
+                "tong_hoc_sinh": tong_hoc_sinh,
+                "tong_giao_vien": tong_giao_vien,
+                "tong_tai_lieu": tong_tai_lieu,
+                "tong_luot_lam_bai": tong_luot_lam_bai,
+                "doc_types": doc_types,
+                "weekly_activity": weekly_activity
+            }
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/upload-document-only")
+async def upload_document_only(file: UploadFile = File(...)):
+    try:
+        goc_dir = "uploads/tai_lieu_goc"
+        os.makedirs(goc_dir, exist_ok=True)
+        
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        file_id = uuid.uuid4().hex
+        
+        saved_filename = f"{file_id}{file_ext}"
+        saved_filepath = os.path.join(goc_dir, saved_filename)
+        with open(saved_filepath, "wb") as buffer:
+            buffer.write(await file.read())
+            
+        file_goc_url = f"http://127.0.0.1:80/ai_local/AI_chat/uploads/tai_lieu_goc/{saved_filename}"
+        
+        return {"status": "success", "file_goc": file_goc_url}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# =============================================================
+# API ADMIN: LẤY NHẬT KÝ HOẠT ĐỘNG TOÀN HỆ THỐNG (TIMELINE)
+# =============================================================
+@router.get("/system-activity-logs")
+async def get_system_activity_logs():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        sql = """
+            -- 1. Học sinh nộp bài
+            SELECT 'hoc_sinh' as role, h.ten_hoc_sinh as name, 
+                   CONCAT('Đã nộp bài tập ', UPPER(l.part), ' (Đạt ', ROUND((l.diem_so/l.tong_so_cau)*100), '%)') as action, 
+                   l.thoi_gian_nop as time
+            FROM lich_su_lam_bai l
+            JOIN hoc_sinh h ON l.id_hoc_sinh = h.id_tai_khoan
+            
+            UNION ALL
+            
+            -- 2. Học sinh xem học liệu
+            SELECT 'hoc_sinh' as role, h.ten_hoc_sinh as name, 
+                   CONCAT('Vừa xem học liệu: ', t.tieu_de) as action, 
+                   x.thoi_gian_xem as time
+            FROM lich_su_xem_tai_lieu x
+            JOIN hoc_sinh h ON x.id_hoc_sinh = h.id_tai_khoan
+            JOIN tai_lieu_hoc t ON x.id_tai_lieu = t.id
+            
+            UNION ALL
+            
+            -- 3. Giáo viên/Admin thêm/sửa tài liệu (Từ bảng chung)
+            SELECT 'giao_vien' as role, 'Giáo viên / Admin' as name, 
+                   CONCAT('Đã tác động tài liệu: ', tieu_de) as action, 
+                   ngay_tao as time
+            FROM tai_lieu_hoc
+
+            UNION ALL
+
+            -- 4. ĐÃ FIX LỖI: HIỂN THỊ ID GIÁO VIÊN THAY VÌ JOIN BẢNG LỖI
+            SELECT 'giao_vien' as role, CONCAT('Giáo viên (ID: ', gv_log.id_giao_vien, ')') as name,
+                   CONCAT(gv_log.hanh_dong, ' - ', IFNULL(gv_log.chi_tiet, '')) as action,
+                   gv_log.thoi_gian as time
+            FROM lich_su_hoat_dong_gv gv_log
+            
+            ORDER BY time DESC LIMIT 80
+        """
+        cursor.execute(sql)
+        logs = cursor.fetchall()
+        db.close()
+        
+        return {"status": "success", "data": logs}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "message": str(e)}
+
+# =============================================================
+# API ADMIN: LAY DỮ LIỆU HOẠT ĐỘNG CHO BIỂU ĐỒ CỘT
+# =============================================================
+@router.get("/activity-chart")
+async def get_activity_chart(time_filter: str = '7_days'):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        labels = []
+        data_points = []
+
+        if time_filter == '7_days':
+            today = datetime.date.today()
+            dates = [(today - datetime.timedelta(days=i)) for i in range(6, -1, -1)]
+            for d in dates:
+                labels.append(d.strftime('%d/%m'))
+                cursor.execute("SELECT COUNT(*) as cnt FROM lich_su_lam_bai WHERE DATE(thoi_gian_nop) = %s", (d,))
+                data_points.append(cursor.fetchone()['cnt'])
+                
+        elif time_filter == 'this_month':
+            today = datetime.date.today()
+            start_date = today.replace(day=1)
+            num_days = (today - start_date).days + 1
+            dates = [(start_date + datetime.timedelta(days=i)) for i in range(num_days)]
+            for d in dates:
+                labels.append(d.strftime('%d/%m'))
+                cursor.execute("SELECT COUNT(*) as cnt FROM lich_su_lam_bai WHERE DATE(thoi_gian_nop) = %s", (d,))
+                data_points.append(cursor.fetchone()['cnt'])
+
+        elif time_filter == 'all_time':
+            # Gom nhóm theo từng tháng
+            cursor.execute("""
+                SELECT DATE_FORMAT(thoi_gian_nop, '%m/%Y') as month_str, COUNT(*) as cnt 
+                FROM lich_su_lam_bai 
+                GROUP BY DATE_FORMAT(thoi_gian_nop, '%m/%Y'), YEAR(thoi_gian_nop), MONTH(thoi_gian_nop)
+                ORDER BY YEAR(thoi_gian_nop) ASC, MONTH(thoi_gian_nop) ASC
+            """)
+            rows = cursor.fetchall()
+            for r in rows:
+                labels.append(r['month_str'])
+                data_points.append(r['cnt'])
+
+        db.close()
+        return {"status": "success", "labels": labels, "data": data_points}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# =========================================================================
+# API ADMIN: LẤY TOÀN BỘ LỊCH SỬ HỌC SINH XEM TÀI LIỆU
+# =========================================================================
+@router.get("/all-doc-view-history")
+async def get_all_doc_view_history():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        sql = """
+            SELECT h.ten_hoc_sinh, t.tieu_de, x.thoi_gian_xem
+            FROM lich_su_xem_tai_lieu x
+            JOIN hoc_sinh h ON x.id_hoc_sinh = h.id_tai_khoan
+            JOIN tai_lieu_hoc t ON x.id_tai_lieu = t.id
+            ORDER BY x.thoi_gian_xem DESC LIMIT 200
+        """
+        cursor.execute(sql)
+        history = cursor.fetchall()
+        db.close()
+        return {"status": "success", "data": history}
     except Exception as e:
         return {"status": "error", "message": str(e)}

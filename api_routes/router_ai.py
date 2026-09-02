@@ -19,6 +19,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
 from langchain_core.messages import HumanMessage, AIMessage
 
 load_dotenv()
@@ -31,7 +32,7 @@ genai.configure(api_key=GOOGLE_API_KEY)
 llm = ChatOpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
     api_key=GOOGLE_API_KEY, 
-    model_name="gemini-2.5-flash", 
+    model_name="gemini-3.6-flash", # <--- Cập nhật tại đây
     temperature=0.5,
     max_tokens=8192 
 )
@@ -45,7 +46,7 @@ global_vectorstore = None
 
 embeddings = GoogleGenerativeAIEmbeddings(
     model="models/embedding-001",
-    google_api_key=GOOGLE_API_KEY
+    google_api_key=os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 )
 nova_tasks = {}
 
@@ -87,10 +88,10 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
             image_bytes = await image.read()
             image_parts = [{"mime_type": image.content_type, "data": image_bytes}]
             
-            model = genai.GenerativeModel('gemini-2.5-flash')
+            model = genai.GenerativeModel('gemini-3.6-flash')
             response = await model.generate_content_async([image_parts[0], final_prompt])
         else:
-            model = genai.GenerativeModel('gemini-2.5-flash') 
+            model = genai.GenerativeModel('gemini-3.6-flash') 
             response = await model.generate_content_async(final_prompt)
 
         raw_text = response.text.strip()
@@ -124,7 +125,7 @@ async def generate_part1_api(files: List[UploadFile] = File(...)):
 
         strict_rule = f"\nYÊU CẦU AUTO-TAGGING: Dựa vào nội dung bức ảnh, hãy tự phân tích xem nó thuộc dạng nào trong Menu dưới đây, và THÊM trường 'id_dang_bai' (chứa số ID tương ứng) vào JSON.\nMENU DẠNG BÀI HIỆN CÓ: [{menu_dang_bai}]."
         system_prompt = config["system_prompt"] + strict_rule
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-3.6-flash')
         
         danh_sach_cau_hoi = [] 
         
@@ -209,7 +210,7 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
 """
         system_prompt = config["system_prompt"] + strict_rule
         
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-3.6-flash')
         
         print(f"Đang sinh {req.num_questions} câu cho {req.part} theo chuỗi tư duy mới...")
         response = await model.generate_content_async(system_prompt)
@@ -247,7 +248,7 @@ async def generate_passage_questions_api(req: QuestionRequest):
 
         system_prompt = config["system_prompt"] + f"\n\nYêu cầu bổ sung: Hãy sinh ra CHÍNH XÁC {req.num_questions} đoạn văn. Mỗi đoạn văn đi kèm 3 câu hỏi."
         
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-3.6-flash')
         
         print(f"Đang sinh Đoạn văn + {req.num_questions} câu cho {req.part}...")
         response = model.generate_content(system_prompt)
@@ -370,7 +371,7 @@ TUYỆT ĐỐI KHÔNG lặp lại lời chào (như "Chào bạn!", "Mình là N
             history_text = "\n".join([f"{'Học sinh' if m.role == 'user' else 'Nova'}: {m.content}" for m in request.history[:-1]])
             full_prompt = f"{base_prompt}\n\n[LỊCH SỬ TRÒ CHUYỆN]\n{history_text}\n\nHọc sinh: {request.yeu_cau}\nNova:"
         
-            model = genai.GenerativeModel('gemini-2.5-flash')
+            model = genai.GenerativeModel('gemini-3.6-flash')
             response = model.generate_content(full_prompt)
             result = response.text
 

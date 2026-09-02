@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Query, HTTPException
 from database import get_db_connection
 from schemas import HistoryData, IIGSubmitData
+from pydantic import BaseModel
 import json
 import re
 import os
 import random
 import google.generativeai as genai
+
+class LogViewRequest(BaseModel):
+    id_hoc_sinh: int
+    id_tai_lieu: int
 
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 router = APIRouter()
@@ -577,3 +582,73 @@ async def generate_matching(topic_id: int, limit: int = Query(5, le=15)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+        
+# =============================================================
+# API LẤY STATS CHO DASHBOARD HỌC SINH
+# =============================================================
+@router.get("/dashboard-stats/{id_hoc_sinh}")
+async def get_student_dashboard_stats(id_hoc_sinh: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        cursor.execute("SELECT COUNT(*) as total FROM bai_tap_giao WHERE id_lop IN (SELECT id_lop FROM hoc_sinh WHERE id = %s)", (id_hoc_sinh,))
+        tong_bai_duoc_giao = cursor.fetchone()['total']
+        
+        cursor.execute("SELECT COUNT(*) as total FROM lich_su_lam_bai WHERE id_hoc_sinh = %s", (id_hoc_sinh,))
+        tong_bai_da_nop = cursor.fetchone()['total']
+        
+        cursor.execute("SELECT AVG(diem_so) as avg_score FROM lich_su_lam_bai WHERE id_hoc_sinh = %s", (id_hoc_sinh,))
+        diem_trung_binh = cursor.fetchone()['avg_score'] or 0
+        
+        cursor.execute("""
+            SELECT SUM(diem_so) as total_score, SUM(tong_so_cau) as total_questions
+            FROM lich_su_lam_bai 
+            WHERE id_hoc_sinh = %s
+        """, (id_hoc_sinh,))
+        diem_tong = cursor.fetchone()
+        tong_diem = diem_tong['total_score'] or 0
+        tong_cau_tra_loi = diem_tong['total_questions'] or 0
+        
+        db.close()
+        return {
+            "status": "success", 
+            "data": {
+                "tong_bai_duoc_giao": tong_bai_duoc_giao,
+                "tong_bai_da_nop": tong_bai_da_nop,
+                "diem_trung_binh": round(diem_trung_binh, 2),
+                "tong_diem": tong_diem,
+                "tong_cau_tra_loi": tong_cau_tra_loi
+            }
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# API HỌC SINH CHỈ ĐƯỢC PHÉP LẤY DANH SÁCH (READ-ONLY)
+@router.get("/get-all-grammar-docs")
+async def get_all_grammar_docs():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        # Lấy toàn bộ dữ liệu (không cần id_giao_vien vì tài liệu là dùng chung cho toàn hệ thống)
+        cursor.execute("SELECT id, tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, ngay_tao FROM tai_lieu_hoc ORDER BY id DESC")
+        docs = cursor.fetchall()
+        db.close()
+        return {"status": "success", "data": docs}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/log-doc-view")
+async def log_doc_view(req: LogViewRequest):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        cursor.execute(
+            "INSERT INTO lich_su_xem_tai_lieu (id_hoc_sinh, id_tai_lieu) VALUES (%s, %s)", 
+            (req.id_hoc_sinh, req.id_tai_lieu)
+        )
+        db.commit()
+        db.close()
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

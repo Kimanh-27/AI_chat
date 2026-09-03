@@ -380,36 +380,40 @@ async def get_class_progress(id_lop: int):
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("SELECT id_tai_khoan, ten_hoc_sinh FROM hoc_sinh WHERE id_lop = %s", (id_lop,))
+
+        cursor.execute("""
+            SELECT h.id_tai_khoan as id, h.ten_hoc_sinh as ten
+            FROM chi_tiet_lop_hoc c
+            JOIN hoc_sinh h ON c.id_hoc_sinh = h.id_tai_khoan
+            WHERE c.id_lop = %s
+        """, (id_lop,))
         students = cursor.fetchall()
-        
-        sql = """
-            SELECT h.id_tai_khoan, l.part, SUM(l.diem_so) as total_correct, SUM(l.tong_so_cau) as total_questions
-            FROM hoc_sinh h
-            LEFT JOIN lich_su_lam_bai l ON h.id_tai_khoan = l.id_hoc_sinh
-            WHERE h.id_lop = %s AND l.part IS NOT NULL
-            GROUP BY h.id_tai_khoan, l.part
-        """
-        cursor.execute(sql, (id_lop,))
-        stats = cursor.fetchall()
-        conn.close()
-        
+
         result_data = []
         for st in students:
-            st_data = {
-                "id": st['id_tai_khoan'],
-                "ten": st['ten_hoc_sinh'],
-                "parts": {f"part_{i}": 0 for i in range(1, 8)} 
-            }
-            for stat in stats:
-                if stat['id_tai_khoan'] == st['id_tai_khoan']:
-                    part_key = stat['part']
-                    if stat['total_questions'] > 0:
-                        pct = round((stat['total_correct'] / stat['total_questions']) * 100)
-                        st_data['parts'][part_key] = pct
-            result_data.append(st_data)
-            
+            id_hs = st["id"]
+            cursor.execute("""
+                SELECT part, SUM(diem_so) as diem, SUM(tong_so_cau) as tong 
+                FROM lich_su_lam_bai 
+                WHERE id_hoc_sinh = %s 
+                GROUP BY part
+            """, (id_hs,))
+            history = cursor.fetchall()
+
+            parts_progress = {f"part_{i}": 0 for i in range(1, 8)}
+            for h in history:
+                p = h["part"].lower()
+                if p in parts_progress and h["tong"] > 0:
+                    pct = round((h["diem"] / h["tong"]) * 100)
+                    parts_progress[p] = pct
+
+            result_data.append({
+                "id": id_hs,
+                "ten": st["ten"],
+                "parts": parts_progress
+            })
+
+        conn.close()
         return {"status": "success", "data": result_data}
     except Exception as e:
         return {"status": "error", "message": str(e)}

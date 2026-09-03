@@ -100,15 +100,12 @@ async def assign_homework(data: HomeworkData):
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         
-        # 1. Lấy toàn bộ câu hỏi của Part đó để chọn
         cursor.execute("SELECT id, doan_van FROM ngan_hang_cau_hoi WHERE part = %s", (data.part,))
         all_questions = cursor.fetchall()
-        
         if not all_questions:
             return {"status": "error", "message": "Kho câu hỏi Part này đang trống!"}
 
         selected_ids = []
-        
         if data.part in ["part_3", "part_4", "part_6", "part_7"]:
             groups = {}
             for q in all_questions:
@@ -138,6 +135,9 @@ async def assign_homework(data: HomeworkData):
         val = (data.ten_bai_tap, data.id_giao_vien, data.id_lop, data.part, data.so_luong_cau, data.han_nop, data.thoi_gian_lam_bai, ids_json)
         cursor.execute(sql, val)
         
+        chi_tiet_log = f"Đã tạo và giao bài tập: '{data.ten_bai_tap}' (Part {data.part.replace('part_', '')})"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'GIAO_BAI_TAP', %s)", (data.id_giao_vien, chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã tạo đề chung và giao bài thành công!"}
@@ -170,8 +170,7 @@ async def update_homework(id_bai_tap: int, data: dict):
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        #kiểm tra giao riêng hay giao chung
-        cursor.execute("SELECT id_hoc_sinh FROM bai_tap_giao WHERE id = %s", (id_bai_tap,))
+        cursor.execute("SELECT id_hoc_sinh, id_giao_vien, ten_bai_tap FROM bai_tap_giao WHERE id = %s", (id_bai_tap,))
         hw_info = cursor.fetchone()
         
         if not hw_info:
@@ -180,14 +179,15 @@ async def update_homework(id_bai_tap: int, data: dict):
         new_deadline = data.get('han_nop')
         new_lop = data.get('id_lop')
         
-        # nếu là bài tập giao theo lớp (id_hoc_sinh bị trống/null) -> Cập nhật cả Lớp và Hạn nộp
         if hw_info.get('id_hoc_sinh') is None:
             sql = "UPDATE bai_tap_giao SET han_nop = %s, id_lop = %s WHERE id = %s"
             cursor.execute(sql, (new_deadline, new_lop, id_bai_tap))
-        # Nếu là bài tập cá nhân -> KHÔNG ĐƯỢC ĐỔI LỚP, chỉ cho phép đổi Hạn nộp
         else:
             sql = "UPDATE bai_tap_giao SET han_nop = %s WHERE id = %s"
             cursor.execute(sql, (new_deadline, id_bai_tap))
+
+        chi_tiet_log = f"Đã cập nhật hạn nộp/lớp cho bài tập: '{hw_info['ten_bai_tap']}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'GIAO_BAI_TAP', %s)", (hw_info['id_giao_vien'], chi_tiet_log))
 
         conn.commit()
         conn.close()
@@ -204,11 +204,17 @@ async def delete_homeworks(req: DeleteHomeworkRequest):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # chuỗi định dạng %s,%s,%s tương ứng với số lượng ID cần xóa
+        cursor.execute("SELECT id_giao_vien FROM bai_tap_giao WHERE id = %s", (req.ids[0],))
+        gv_info = cursor.fetchone()
+        
         format_strings = ','.join(['%s'] * len(req.ids))
         sql = f"DELETE FROM bai_tap_giao WHERE id IN ({format_strings})"
         cursor.execute(sql, tuple(req.ids))
         
+        if gv_info:
+            chi_tiet_log = f"Đã xóa {len(req.ids)} bài tập đã giao"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'GIAO_BAI_TAP', %s)", (gv_info[0], chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã xóa thành công!"}
@@ -461,15 +467,14 @@ async def save_and_assign(req: SaveAndAssignRequest):
         inserted_ids = []
 
         sql_insert_q = """INSERT INTO ngan_hang_cau_hoi 
-                         (id_giao_vien, id_dang_bai, part, hinh_anh, doan_van, cau_hoi, dap_an_a, dap_an_b, dap_an_c, dap_an_d, dap_an_dung, giai_thich) 
-                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                          (id_giao_vien, id_dang_bai, part, hinh_anh, doan_van, cau_hoi, dap_an_a, dap_an_b, dap_an_c, dap_an_d, dap_an_dung, giai_thich) 
+                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
         
         for q in req.questions:
             val = (req.id_giao_vien, None, req.part, None, None, q['cau_hoi'], q['dap_an_a'], q['dap_an_b'], q['dap_an_c'], q.get('dap_an_d', ''), q['dap_an_dung'], q['giai_thich'])
             cursor.execute(sql_insert_q, val)
             inserted_ids.append(cursor.lastrowid)
 
-        # Tạo Bài Tập Giao CÁ NHÂN
         han_nop = (datetime.datetime.now() + datetime.timedelta(days=3)).strftime("%Y-%m-%dT23:59:59")
         ids_json = json.dumps(inserted_ids)
         
@@ -478,6 +483,10 @@ async def save_and_assign(req: SaveAndAssignRequest):
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
         val_hw = (req.ten_bai_tap, req.id_giao_vien, req.id_lop, req.id_hoc_sinh, req.part, len(inserted_ids), han_nop, 15, ids_json)
         cursor.execute(sql_hw, val_hw)
+
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã sinh đề khắc phục ({len(inserted_ids)} câu) và giao cá nhân: '{req.ten_bai_tap}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'GIAO_BAI_TAP', %s)", (req.id_giao_vien, chi_tiet_log))
 
         db.commit()
         cursor.close()
@@ -541,6 +550,14 @@ async def add_announcement(req: ThongBaoLopModel):
         cursor = db.cursor()
         sql = "INSERT INTO thong_bao_lop (id_lop, tieu_de, noi_dung) VALUES (%s, %s, %s)"
         cursor.execute(sql, (req.id_lop, req.tieu_de, req.noi_dung))
+        
+        # --- LƯU NHẬT KÝ ---
+        cursor.execute("SELECT id_giao_vien FROM lop_hoc WHERE id = %s", (req.id_lop,))
+        gv = cursor.fetchone()
+        if gv:
+            chi_tiet_log = f"Đã thêm thông báo mới: '{req.tieu_de}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (gv[0], chi_tiet_log))
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã gửi thông báo cho lớp thành công!"}
@@ -554,6 +571,14 @@ async def update_announcement(notice_id: int, req: ThongBaoLopModel):
         cursor = db.cursor()
         sql = "UPDATE thong_bao_lop SET tieu_de = %s, noi_dung = %s WHERE id = %s"
         cursor.execute(sql, (req.tieu_de, req.noi_dung, notice_id))
+        
+        # --- LƯU NHẬT KÝ ---
+        cursor.execute("SELECT id_giao_vien FROM lop_hoc WHERE id = %s", (req.id_lop,))
+        gv = cursor.fetchone()
+        if gv:
+            chi_tiet_log = f"Đã cập nhật thông báo: '{req.tieu_de}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (gv[0], chi_tiet_log))
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã cập nhật thông báo thành công!"}
@@ -565,7 +590,19 @@ async def delete_announcement(notice_id: int):
     try:
         db = get_db_connection()
         cursor = db.cursor()
+        cursor.execute("SELECT id_lop, tieu_de FROM thong_bao_lop WHERE id = %s", (notice_id,))
+        notice = cursor.fetchone()
+        
         cursor.execute("DELETE FROM thong_bao_lop WHERE id = %s", (notice_id,))
+        
+        # --- LƯU NHẬT KÝ ---
+        if notice:
+            cursor.execute("SELECT id_giao_vien FROM lop_hoc WHERE id = %s", (notice[0],))
+            gv = cursor.fetchone()
+            if gv:
+                chi_tiet_log = f"Đã xóa thông báo: '{notice[1]}'"
+                cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (gv[0], chi_tiet_log))
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã xóa thông báo thành công!"}
@@ -601,6 +638,11 @@ async def add_topic(req: ChuDeModel):
             return {"status": "error", "message": "Chủ đề này đã tồn tại!"}
             
         cursor.execute("INSERT INTO chu_de_tu_vung (chu_de, id_giao_vien) VALUES (%s, %s)", (req.chu_de, req.id_giao_vien))
+        
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã tạo chủ đề từ vựng mới: '{req.chu_de}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_TU_VUNG', %s)", (req.id_giao_vien, chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã tạo chủ đề mới!"}
@@ -617,6 +659,11 @@ async def update_topic(id_chu_de: int, req: ChuDeModel):
             return {"status": "error", "message": "Tên chủ đề này đã tồn tại!"}
             
         cursor.execute("UPDATE chu_de_tu_vung SET chu_de = %s WHERE id = %s AND id_giao_vien = %s", (req.chu_de, id_chu_de, req.id_giao_vien))
+        
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã đổi tên chủ đề thành: '{req.chu_de}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_TU_VUNG', %s)", (req.id_giao_vien, chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã cập nhật tên chủ đề!"}
@@ -628,8 +675,18 @@ async def delete_topic(id_chu_de: int, id_giao_vien: int):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        # Lấy tên chủ đề trước khi xóa
+        cursor.execute("SELECT chu_de FROM chu_de_tu_vung WHERE id = %s", (id_chu_de,))
+        chu_de_info = cursor.fetchone()
+        
         cursor.execute("DELETE FROM tu_vung WHERE id_chu_de = %s", (id_chu_de,))
         cursor.execute("DELETE FROM chu_de_tu_vung WHERE id = %s AND id_giao_vien = %s", (id_chu_de, id_giao_vien))
+        
+        # --- LƯU NHẬT KÝ ---
+        if chu_de_info:
+            chi_tiet_log = f"Đã xóa chủ đề: '{chu_de_info[0]}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_TU_VUNG', %s)", (id_giao_vien, chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã xóa chủ đề!"}
@@ -659,6 +716,11 @@ async def add_vocab(req: TuVungModel):
             
         cursor.execute("INSERT INTO tu_vung (id_giao_vien, id_chu_de, tu, phien_am, nghia, vi_du) VALUES (%s, %s, %s, %s, %s, %s)", 
                       (req.id_giao_vien, req.id_chu_de, req.tu, req.phien_am, req.nghia, req.vi_du))
+        
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã thêm từ vựng: '{req.tu}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_TU_VUNG', %s)", (req.id_giao_vien, chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã thêm từ vựng mới!"}
@@ -676,6 +738,11 @@ async def update_vocab(id_tu: int, req: TuVungModel):
             
         cursor.execute("UPDATE tu_vung SET tu=%s, phien_am=%s, nghia=%s, vi_du=%s WHERE id=%s AND id_giao_vien=%s", 
                       (req.tu, req.phien_am, req.nghia, req.vi_du, id_tu, req.id_giao_vien))
+        
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã sửa từ vựng thành: '{req.tu}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_TU_VUNG', %s)", (req.id_giao_vien, chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã cập nhật từ vựng!"}
@@ -687,7 +754,16 @@ async def delete_vocab(id_tu: int, id_giao_vien: int):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        cursor.execute("SELECT tu FROM tu_vung WHERE id = %s", (id_tu,))
+        tu_info = cursor.fetchone()
+        
         cursor.execute("DELETE FROM tu_vung WHERE id = %s AND id_giao_vien = %s", (id_tu, id_giao_vien))
+        
+        # --- LƯU NHẬT KÝ ---
+        if tu_info:
+            chi_tiet_log = f"Đã xóa từ vựng: '{tu_info[0]}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_TU_VUNG', %s)", (id_giao_vien, chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã xóa từ vựng!"}
@@ -708,6 +784,11 @@ async def bulk_add_vocab(req: BulkTuVungModel):
                               (req.id_giao_vien, req.id_chu_de, item.tu, item.phien_am, item.nghia, item.vi_du))
                 success_count += 1
                 
+        # --- LƯU NHẬT KÝ ---
+        if success_count > 0:
+            chi_tiet_log = f"Đã quét AI và lưu thành công {success_count} từ vựng"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_TU_VUNG', %s)", (req.id_giao_vien, chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": f"Đã nhập thành công {success_count} từ vựng từ Nova!"}

@@ -132,9 +132,9 @@ async def get_classes_by_teacher(teacher_id: int):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         sql = """
-            SELECT l.id, l.ten_lop, l.ma_tham_gia, COUNT(h.id_tai_khoan) as so_luong_hoc_sinh 
+            SELECT l.id, l.ten_lop, l.ma_tham_gia, COUNT(c.id_hoc_sinh) as so_luong_hoc_sinh 
             FROM lop_hoc l 
-            LEFT JOIN hoc_sinh h ON l.id = h.id_lop 
+            LEFT JOIN chi_tiet_lop_hoc c ON l.id = c.id_lop 
             WHERE l.id_giao_vien = %s 
             GROUP BY l.id
         """
@@ -153,9 +153,10 @@ async def get_students_by_class(class_id: int):
         sql = """
             SELECT h.id as id_hoc_sinh, h.ten_hoc_sinh, h.ngay_sinh, h.so_dien_thoai, 
                 t.id as id_tai_khoan, t.ten_dang_nhap, t.email
-            FROM hoc_sinh h
+            FROM chi_tiet_lop_hoc c
+            JOIN hoc_sinh h ON c.id_hoc_sinh = h.id_tai_khoan
             JOIN tai_khoan t ON h.id_tai_khoan = t.id
-            WHERE h.id_lop = %s
+            WHERE c.id_lop = %s
         """
         cursor.execute(sql, (class_id,))
         students = cursor.fetchall()
@@ -266,31 +267,25 @@ async def add_account(acc: AccountModel):
     try:
         db = get_db_connection()
         cursor = db.cursor()
-        # 1. BẮT LỖI TRÙNG EMAIL
         if acc.email and acc.email.strip() != "":
             cursor.execute("SELECT id FROM tai_khoan WHERE email = %s", (acc.email.strip(),))
             if cursor.fetchone():
                 db.close()
                 return {"status": "error", "message": "Email này đã được sử dụng trên hệ thống!"}
         if acc.vai_tro == 'teacher':
-            # bắt lỗi trùng Tên đăng nhập
             if acc.ten_dang_nhap and acc.ten_dang_nhap.strip() != "":
                 cursor.execute("SELECT id FROM tai_khoan WHERE ten_dang_nhap = %s", (acc.ten_dang_nhap.strip(),))
                 if cursor.fetchone():
                     db.close()
                     return {"status": "error", "message": "Tên đăng nhập này đã tồn tại!"}
-                    
             if not acc.mat_khau or acc.mat_khau.strip() == "":
                 acc.mat_khau = "123456"
-                
         elif acc.vai_tro == 'student':
-            # bắt lỗi trùng số điện thoại
             if acc.so_dien_thoai and acc.so_dien_thoai.strip() != "":
                 cursor.execute("SELECT id_tai_khoan FROM hoc_sinh WHERE so_dien_thoai = %s", (acc.so_dien_thoai.strip(),))
                 if cursor.fetchone():
                     db.close()
                     return {"status": "error", "message": "Số điện thoại này đã được đăng ký bởi học sinh khác!"}
-                    
             acc.ten_dang_nhap = tao_ten_dang_nhap(cursor, acc.ten_hoc_sinh, acc.ngay_sinh)
             if not acc.mat_khau or acc.mat_khau.strip() == "":
                 acc.mat_khau = str(random.randint(100000, 999999))
@@ -301,10 +296,12 @@ async def add_account(acc: AccountModel):
         cursor.execute(sql, (acc.ten_dang_nhap, acc.email, hashed_password, acc.vai_tro))
         new_acc_id = cursor.lastrowid
         
-        if acc.vai_tro == 'student' and acc.id_lop is not None:
-            sql_hs = "INSERT INTO hoc_sinh (ten_hoc_sinh, ngay_sinh, so_dien_thoai, email, id_tai_khoan, id_lop) VALUES (%s, %s, %s, %s, %s, %s)"
-            cursor.execute(sql_hs, (acc.ten_hoc_sinh, acc.ngay_sinh, acc.so_dien_thoai, acc.email, new_acc_id, acc.id_lop))
-            
+        if acc.vai_tro == 'student':
+            sql_hs = "INSERT INTO hoc_sinh (ten_hoc_sinh, ngay_sinh, so_dien_thoai, email, id_tai_khoan) VALUES (%s, %s, %s, %s, %s)"
+            cursor.execute(sql_hs, (acc.ten_hoc_sinh, acc.ngay_sinh, acc.so_dien_thoai, acc.email, new_acc_id))
+            if getattr(acc, 'id_lop', None) is not None:
+                cursor.execute("INSERT INTO chi_tiet_lop_hoc (id_hoc_sinh, id_lop, trang_thai_hoc) VALUES (%s, %s, 'dang_hoc')", (new_acc_id, acc.id_lop))
+                
         db.commit()
         db.close()
         
@@ -383,21 +380,21 @@ async def delete_account(acc_id: int):
         if role == 'teacher':
             cursor.execute("SELECT id FROM lop_hoc WHERE id_giao_vien = %s", (acc_id,))
             classes = cursor.fetchall()
-            
             for c in classes:
                 class_id = c['id']
-                cursor.execute("SELECT id_tai_khoan FROM hoc_sinh WHERE id_lop = %s", (class_id,))
-                student_acc_ids = [s['id_tai_khoan'] for s in cursor.fetchall()]
+                cursor.execute("SELECT id_hoc_sinh FROM chi_tiet_lop_hoc WHERE id_lop = %s", (class_id,))
+                student_acc_ids = [s['id_hoc_sinh'] for s in cursor.fetchall()]
                 
-                cursor.execute("DELETE FROM hoc_sinh WHERE id_lop = %s", (class_id,))
+                cursor.execute("DELETE FROM chi_tiet_lop_hoc WHERE id_lop = %s", (class_id,))
                 
                 if student_acc_ids:
                     format_strings = ','.join(['%s'] * len(student_acc_ids))
+                    cursor.execute(f"DELETE FROM hoc_sinh WHERE id_tai_khoan IN ({format_strings})", tuple(student_acc_ids))
                     cursor.execute(f"DELETE FROM tai_khoan WHERE id IN ({format_strings})", tuple(student_acc_ids))
-            
             cursor.execute("DELETE FROM lop_hoc WHERE id_giao_vien = %s", (acc_id,))
 
         elif role == 'student':
+            cursor.execute("DELETE FROM chi_tiet_lop_hoc WHERE id_hoc_sinh = %s", (acc_id,))
             cursor.execute("DELETE FROM hoc_sinh WHERE id_tai_khoan = %s", (acc_id,))
 
         cursor.execute("DELETE FROM tai_khoan WHERE id = %s", (acc_id,))
@@ -436,7 +433,6 @@ async def add_class(cls: ClassModel):
         db = get_db_connection()
         cursor = db.cursor()
         
-        # Kiểm tra lớp trùng tên của cùng một giáo viên
         cursor.execute("SELECT id FROM lop_hoc WHERE ten_lop = %s AND id_giao_vien = %s", (cls.ten_lop.strip(), cls.id_giao_vien))
         if cursor.fetchone():
             db.close()
@@ -444,6 +440,11 @@ async def add_class(cls: ClassModel):
             
         cursor.execute("INSERT INTO lop_hoc (ten_lop, ma_tham_gia, id_giao_vien) VALUES (%s, %s, %s)", 
                (cls.ten_lop, cls.ma_tham_gia, cls.id_giao_vien))
+               
+        # LƯU NHẬT KÝ
+        chi_tiet_log = f"Đã thêm lớp học mới: '{cls.ten_lop}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (cls.id_giao_vien, chi_tiet_log))
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã thêm lớp học thành công!"}
@@ -456,15 +457,13 @@ async def update_class(class_id: int, cls: ClassModel):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True) 
         
-        # kiểm tra trùng trong phạm vi giáo viên
-        cursor.execute("SELECT id_giao_vien FROM lop_hoc WHERE id = %s", (class_id,))
+        cursor.execute("SELECT id_giao_vien, ten_lop FROM lop_hoc WHERE id = %s", (class_id,))
         lop_hien_tai = cursor.fetchone()
         if not lop_hien_tai:
             db.close()
             return {"status": "error", "message": "Lớp học không tồn tại!"}
             
         id_giao_vien = lop_hien_tai['id_giao_vien']
-        # Kiểm tra lớp trùng tên
         cursor.execute("SELECT id FROM lop_hoc WHERE ten_lop = %s AND id_giao_vien = %s AND id != %s", (cls.ten_lop.strip(), id_giao_vien, class_id))
         if cursor.fetchone():
             db.close()
@@ -472,6 +471,11 @@ async def update_class(class_id: int, cls: ClassModel):
             
         cursor.execute("UPDATE lop_hoc SET ten_lop = %s, ma_tham_gia = %s WHERE id = %s", 
                (cls.ten_lop, cls.ma_tham_gia, class_id))
+               
+        # LƯU NHẬT KÝ
+        chi_tiet_log = f"Đã sửa thông tin lớp: '{lop_hien_tai['ten_lop']}' thành '{cls.ten_lop}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (id_giao_vien, chi_tiet_log))
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã cập nhật lớp học thành công!"}
@@ -484,16 +488,25 @@ async def delete_class(class_id: int):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
 
-        cursor.execute("SELECT id_tai_khoan FROM hoc_sinh WHERE id_lop = %s", (class_id,))
-        student_acc_ids = [s['id_tai_khoan'] for s in cursor.fetchall()]
+        cursor.execute("SELECT id_giao_vien, ten_lop FROM lop_hoc WHERE id = %s", (class_id,))
+        lop_hien_tai = cursor.fetchone()
 
-        cursor.execute("DELETE FROM hoc_sinh WHERE id_lop = %s", (class_id,))
+        cursor.execute("SELECT id_hoc_sinh FROM chi_tiet_lop_hoc WHERE id_lop = %s", (class_id,))
+        student_acc_ids = [s['id_hoc_sinh'] for s in cursor.fetchall()]
+
+        cursor.execute("DELETE FROM chi_tiet_lop_hoc WHERE id_lop = %s", (class_id,))
 
         if student_acc_ids:
             format_strings = ','.join(['%s'] * len(student_acc_ids))
+            cursor.execute(f"DELETE FROM hoc_sinh WHERE id_tai_khoan IN ({format_strings})", tuple(student_acc_ids))
             cursor.execute(f"DELETE FROM tai_khoan WHERE id IN ({format_strings})", tuple(student_acc_ids))
 
         cursor.execute("DELETE FROM lop_hoc WHERE id = %s", (class_id,))
+
+        # LƯU NHẬT KÝ
+        if lop_hien_tai:
+            chi_tiet_log = f"Đã xóa lớp: '{lop_hien_tai['ten_lop']}' và giải tán {len(student_acc_ids)} học sinh"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (lop_hien_tai['id_giao_vien'], chi_tiet_log))
 
         db.commit()
         db.close()

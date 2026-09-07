@@ -76,13 +76,11 @@ async def save_history(data: HistoryData):
         cursor = conn.cursor(dictionary=True)
         
         chi_tiet = json.loads(data.chi_tiet_bai_lam)
-        
         part_stats = {}
 
         for item in chi_tiet:
             cursor.execute("SELECT part FROM ngan_hang_cau_hoi WHERE id = %s", (item['id_cau_hoi'],))
             q_info = cursor.fetchone()
-            
             raw_part = q_info['part'] if q_info else data.part
             actual_part = str(raw_part).strip().lower()
 
@@ -96,10 +94,18 @@ async def save_history(data: HistoryData):
 
         sql_insert = "INSERT INTO lich_su_lam_bai (id_hoc_sinh, part, diem_so, tong_so_cau, chi_tiet_bai_lam, id_bai_tap) VALUES (%s, %s, %s, %s, %s, %s)"
         
+        parts_logged = []
         for p, stats in part_stats.items():
             if stats['tong'] > 0:
                 chi_tiet_json = json.dumps(stats['chi_tiet'])
                 cursor.execute(sql_insert, (data.id_hoc_sinh, p, stats['diem'], stats['tong'], chi_tiet_json, data.id_bai_tap))
+                parts_logged.append(p.replace('part_', '').upper())
+
+        # --- LƯU NHẬT KÝ HỌC SINH ---
+        if parts_logged:
+            chuoi_parts = ", ".join(parts_logged)
+            chi_tiet_log = f"Đã nộp bài tập ôn luyện (Part {chuoi_parts})"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'student', 'LAM_BAI_TAP', %s)", (data.id_hoc_sinh, chi_tiet_log))
 
         conn.commit()
         cursor.close()
@@ -246,7 +252,7 @@ async def submit_iig_test(data: IIGSubmitData):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        cursor.execute("SELECT dap_an_json FROM de_thi_iig WHERE id = %s", (data.id_de_thi,))
+        cursor.execute("SELECT ten_de, dap_an_json FROM de_thi_iig WHERE id = %s", (data.id_de_thi,))
         de_thi = cursor.fetchone()
         
         if not de_thi:
@@ -276,14 +282,12 @@ async def submit_iig_test(data: IIGSubmitData):
                 "is_correct": is_correct
             })
             
-        if so_cau_nghe == 0:
-            diem_nghe = 5
+        if so_cau_nghe == 0: diem_nghe = 5
         else:
             diem_nghe = min(so_cau_nghe * 5, 495)
             if diem_nghe < 5: diem_nghe = 5 
             
-        if so_cau_doc == 0:
-            diem_doc = 5
+        if so_cau_doc == 0: diem_doc = 5
         else:
             diem_doc = min(so_cau_doc * 5, 495)
             if diem_doc < 5: diem_doc = 5 
@@ -297,6 +301,10 @@ async def submit_iig_test(data: IIGSubmitData):
         cursor.execute(sql, (data.id_hoc_sinh, data.id_de_thi, so_cau_nghe, so_cau_doc, diem_nghe, diem_doc, tong_diem, json.dumps(chi_tiet_bai_lam)))
         id_ket_qua = cursor.lastrowid
         
+        # --- LƯU NHẬT KÝ HỌC SINH ---
+        chi_tiet_log = f"Đã hoàn thành thi thử đề '{de_thi['ten_de']}' (Đạt: {tong_diem} điểm)"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'student', 'LAM_BAI_THI', %s)", (data.id_hoc_sinh, chi_tiet_log))
+
         db.commit()
         cursor.close()
         db.close()

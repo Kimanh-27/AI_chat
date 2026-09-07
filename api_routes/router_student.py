@@ -190,11 +190,12 @@ async def get_student_practice_questions(part_name: str, id_hoc_sinh: int):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
+        # ĐÃ SỬA: Lấy id_giao_vien thông qua bảng chi_tiet_lop_hoc
         cursor.execute("""
             SELECT l.id_giao_vien 
-            FROM hoc_sinh h 
-            JOIN lop_hoc l ON h.id_lop = l.id 
-            WHERE h.id_tai_khoan = %s
+            FROM chi_tiet_lop_hoc c 
+            JOIN lop_hoc l ON c.id_lop = l.id 
+            WHERE c.id_hoc_sinh = %s
         """, (id_hoc_sinh,))
         gv_info = cursor.fetchone()
         

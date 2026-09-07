@@ -385,7 +385,7 @@ async def get_student_class_notices(acc_id: int):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        cursor.execute("SELECT id_lop FROM hoc_sinh WHERE id_tai_khoan = %s", (acc_id,))
+        cursor.execute("SELECT id_lop FROM chi_tiet_lop_hoc WHERE id_hoc_sinh = %s", (acc_id,))
         hs = cursor.fetchone()
         
         if not hs or not hs['id_lop']:
@@ -410,12 +410,12 @@ async def get_student_vocab_topics(acc_id: int):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        # Lấy id_giao_vien đang dạy học sinh này thông qua bảng lop_hoc
+        # ĐÃ SỬA: Nối qua bảng chi_tiet_lop_hoc để lấy id_giao_vien của lớp
         sql_get_gv = """
             SELECT l.id_giao_vien 
-            FROM hoc_sinh h 
-            JOIN lop_hoc l ON h.id_lop = l.id 
-            WHERE h.id_tai_khoan = %s
+            FROM chi_tiet_lop_hoc c 
+            JOIN lop_hoc l ON c.id_lop = l.id 
+            WHERE c.id_hoc_sinh = %s
         """
         cursor.execute(sql_get_gv, (acc_id,))
         gv_info = cursor.fetchone()
@@ -425,7 +425,6 @@ async def get_student_vocab_topics(acc_id: int):
             
         id_giao_vien = gv_info['id_giao_vien']
         
-        # Lấy tất cả chủ đề của giáo viên đó, kèm số lượng từ
         sql_topics = """
             SELECT c.id, c.chu_de, COUNT(t.id) as so_tu 
             FROM chu_de_tu_vung c
@@ -442,6 +441,7 @@ async def get_student_vocab_topics(acc_id: int):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+    
 # ==========================================
 # API HỌC SINH: LẤY DANH SÁCH TỪ VỰNG TRONG 1 CHỦ ĐỀ
 # ==========================================
@@ -506,19 +506,17 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
         """
 
         model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
+        # ĐÃ SỬA: Đổi sang gọi AI bất đồng bộ (async) để server không bị nghẽn
+        response = await model.generate_content_async(prompt) 
         
         raw_text = response.text.strip()
-        
         raw_text = re.sub(r"^```(json)?\s*", "", raw_text, flags=re.IGNORECASE)
         raw_text = re.sub(r"\s*```$", "", raw_text)
 
         quiz_data = json.loads(raw_text)
         for q in quiz_data:
             correct_answer_text = q["options"][q["answerIndex"]]
-            
             random.shuffle(q["options"])
-            
             q["answerIndex"] = q["options"].index(correct_answer_text)
 
         return {"status": "success", "data": quiz_data}
@@ -568,7 +566,8 @@ async def generate_matching(topic_id: int, limit: int = Query(5, le=15)):
         """
 
         model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
+        # ĐÃ SỬA: Đổi sang gọi AI bất đồng bộ
+        response = await model.generate_content_async(prompt)
         
         cleaned_text = response.text.replace("```json", "").replace("```", "").strip()
         data = json.loads(cleaned_text)

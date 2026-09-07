@@ -285,6 +285,12 @@ async def save_practice_questions(questions: List[PracticeQuestion]):
                    q.dap_an_a, q.dap_an_b, q.dap_an_c, q.dap_an_d, q.dap_an_dung, q.giai_thich)
             cursor.execute(sql, val)
 
+        # --- LƯU NHẬT KÝ ---
+        if questions:
+            id_gv = questions[0].id_giao_vien
+            chi_tiet_log = f"Đã duyệt và lưu thành công {len(questions)} câu hỏi ôn luyện mới"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_CAU_HOI', %s)", (id_gv, chi_tiet_log))
+
         db.commit()
         cursor.close()
         db.close()
@@ -302,7 +308,17 @@ async def delete_question(q_id: int):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        cursor.execute("SELECT id_giao_vien FROM ngan_hang_cau_hoi WHERE id = %s", (q_id,))
+        gv_info = cursor.fetchone()
+        
         cursor.execute("DELETE FROM ngan_hang_cau_hoi WHERE id = %s", (q_id,))
+        
+        # --- LƯU NHẬT KÝ ---
+        if gv_info:
+            chi_tiet_log = f"Đã xóa câu hỏi ID: #{q_id} khỏi Ngân hàng"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_CAU_HOI', %s)", (gv_info[0], chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã xóa câu hỏi thành công!"}
@@ -316,6 +332,9 @@ async def update_question(q_id: int, q: UpdateQuestionModel):
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        cursor.execute("SELECT id_giao_vien FROM ngan_hang_cau_hoi WHERE id = %s", (q_id,))
+        gv_info = cursor.fetchone()
+        
         sql = """UPDATE ngan_hang_cau_hoi SET 
                  doan_van=%s, cau_hoi=%s, dap_an_a=%s, dap_an_b=%s, 
                  dap_an_c=%s, dap_an_d=%s, dap_an_dung=%s, giai_thich=%s 
@@ -324,6 +343,12 @@ async def update_question(q_id: int, q: UpdateQuestionModel):
                q.dap_an_d, q.dap_an_dung, q.giai_thich, q_id)
         
         cursor.execute(sql, val)
+        
+        # --- LƯU NHẬT KÝ ---
+        if gv_info:
+            chi_tiet_log = f"Đã cập nhật nội dung câu hỏi ID: #{q_id}"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_CAU_HOI', %s)", (gv_info[0], chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Cập nhật thành công!"}

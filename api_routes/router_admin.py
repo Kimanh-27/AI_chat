@@ -441,7 +441,7 @@ async def add_class(cls: ClassModel):
         cursor.execute("INSERT INTO lop_hoc (ten_lop, ma_tham_gia, id_giao_vien) VALUES (%s, %s, %s)", 
                (cls.ten_lop, cls.ma_tham_gia, cls.id_giao_vien))
                
-        # LƯU NHẬT KÝ
+        # --- LƯU NHẬT KÝ ---
         chi_tiet_log = f"Đã thêm lớp học mới: '{cls.ten_lop}'"
         cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (cls.id_giao_vien, chi_tiet_log))
 
@@ -472,7 +472,7 @@ async def update_class(class_id: int, cls: ClassModel):
         cursor.execute("UPDATE lop_hoc SET ten_lop = %s, ma_tham_gia = %s WHERE id = %s", 
                (cls.ten_lop, cls.ma_tham_gia, class_id))
                
-        # LƯU NHẬT KÝ
+        # --- LƯU NHẬT KÝ ---
         chi_tiet_log = f"Đã sửa thông tin lớp: '{lop_hien_tai['ten_lop']}' thành '{cls.ten_lop}'"
         cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (id_giao_vien, chi_tiet_log))
 
@@ -503,7 +503,7 @@ async def delete_class(class_id: int):
 
         cursor.execute("DELETE FROM lop_hoc WHERE id = %s", (class_id,))
 
-        # LƯU NHẬT KÝ
+        # --- LƯU NHẬT KÝ ---
         if lop_hien_tai:
             chi_tiet_log = f"Đã xóa lớp: '{lop_hien_tai['ten_lop']}' và giải tán {len(student_acc_ids)} học sinh"
             cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (lop_hien_tai['id_giao_vien'], chi_tiet_log))
@@ -544,8 +544,12 @@ async def tao_tin_tuc(
         sql = """INSERT INTO tin_tuc (tieu_de, tom_tat, noi_dung, anh_dai_dien, id_admin) 
                  VALUES (%s, %s, %s, %s, %s)"""
         cursor.execute(sql, (tieu_de, tom_tat, noi_dung, db_img_path, id_admin))
-        db.commit()
         
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã đăng tin tức mới: '{tieu_de}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TIN_TUC', %s)", (id_admin, chi_tiet_log))
+        
+        db.commit()
         new_id = cursor.lastrowid
         cursor.close()
         db.close()
@@ -591,7 +595,11 @@ async def update_news(
 ):
     try:
         db = get_db_connection()
-        cursor = db.cursor()
+        cursor = db.cursor(dictionary=True)
+        
+        cursor.execute("SELECT id_admin FROM tin_tuc WHERE id = %s", (news_id,))
+        news_info = cursor.fetchone()
+        id_admin = news_info['id_admin'] if news_info else 0
         
         if anh_dai_dien and anh_dai_dien.filename:
             upload_dir = "uploads/tin_tuc"
@@ -612,6 +620,11 @@ async def update_news(
             sql = """UPDATE tin_tuc SET tieu_de = %s, tom_tat = %s, noi_dung = %s WHERE id = %s"""
             cursor.execute(sql, (tieu_de, tom_tat, noi_dung, news_id))
             
+        # --- LƯU NHẬT KÝ ---
+        if id_admin:
+            chi_tiet_log = f"Đã cập nhật tin tức: '{tieu_de}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TIN_TUC', %s)", (id_admin, chi_tiet_log))
+            
         db.commit()
         cursor.close()
         db.close()
@@ -623,8 +636,18 @@ async def update_news(
 async def delete_news(news_id: int):
     try:
         db = get_db_connection()
-        cursor = db.cursor()
+        cursor = db.cursor(dictionary=True)
+        
+        cursor.execute("SELECT id_admin, tieu_de FROM tin_tuc WHERE id = %s", (news_id,))
+        news_info = cursor.fetchone()
+        
         cursor.execute("DELETE FROM tin_tuc WHERE id = %s", (news_id,))
+        
+        # --- LƯU NHẬT KÝ ---
+        if news_info:
+            chi_tiet_log = f"Đã xóa tin tức: '{news_info['tieu_de']}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TIN_TUC', %s)", (news_info['id_admin'], chi_tiet_log))
+            
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã xóa bài viết thành công!"}
@@ -666,7 +689,6 @@ async def user_update_profile(acc_id: int, req: UpdateProfileModel):
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        # --- CẬP NHẬT TÀI KHOẢN 
         cursor.execute("SELECT mat_khau FROM tai_khoan WHERE id = %s", (acc_id,))
         user = cursor.fetchone()
         if not user:
@@ -688,7 +710,6 @@ async def user_update_profile(acc_id: int, req: UpdateProfileModel):
             hashed_new = hash_password(req.mat_khau_moi)
             cursor.execute("UPDATE tai_khoan SET mat_khau = %s WHERE id = %s", (hashed_new, acc_id))
             
-        # --- CẬP NHẬT HỌC SINH 
         if req.vai_tro == 'student':
             cursor.execute("SELECT ten_hoc_sinh, ngay_sinh, so_dien_thoai FROM hoc_sinh WHERE id_tai_khoan = %s", (acc_id,))
             hs_old = cursor.fetchone()

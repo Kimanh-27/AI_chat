@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, Query
 from database import get_db_connection
 import uuid
 import shutil
@@ -24,6 +24,7 @@ async def upload_iig(
     ten_de: str = Form(...),
     nam_phat_hanh: int = Form(...),
     dap_an_json: str = Form(...),
+    id_admin: int = Form(0), # Mặc định là 0 nếu UI chưa truyền
     file_pdf: UploadFile = File(...),
     file_audio: UploadFile = File(None)
 ):
@@ -46,6 +47,11 @@ async def upload_iig(
                  VALUES (%s, %s, %s, %s, %s)"""
         cursor.execute(sql, (ten_de, nam_phat_hanh, f"{pdf_path}", 
                      f"{audio_path}" if audio_path else None, dap_an_json))
+        
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã tải lên đề thi IIG: '{ten_de}' (Năm {nam_phat_hanh})"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_DE_THI', %s)", (id_admin, chi_tiet_log))
+
         db.commit()
         cursor.close()
         db.close()
@@ -89,19 +95,55 @@ async def get_single_iig_test(test_id: int):
 
 # API CẬP NHẬT LẠI ĐÁP ÁN CHO ĐỀ IIG
 @router.post("/update-iig-answers/{test_id}")
-async def update_iig_answers(test_id: int, req: UpdateAnswersModel):
+async def update_iig_answers(test_id: int, req: UpdateAnswersModel, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor()
         
-        cursor.execute("UPDATE de_thi_iig SET dap_an_json = %s WHERE id = %s", (req.dap_an_json, test_id))
-        db.commit()
+        # Lấy tên đề để ghi log cho rõ ràng
+        cursor.execute("SELECT ten_de FROM de_thi_iig WHERE id = %s", (test_id,))
+        de_thi = cursor.fetchone()
         
+        cursor.execute("UPDATE de_thi_iig SET dap_an_json = %s WHERE id = %s", (req.dap_an_json, test_id))
+        
+        # --- LƯU NHẬT KÝ ---
+        if de_thi:
+            chi_tiet_log = f"Đã cập nhật lại khóa đáp án cho đề: '{de_thi[0]}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_DE_THI', %s)", (id_admin, chi_tiet_log))
+
+        db.commit()
         cursor.close()
         db.close()
         return {"status": "success", "message": "Đã cập nhật lại khóa đáp án thành công!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+# ==========================================
+# API XÓA ĐỀ THI IIG
+# ==========================================
+@router.post("/delete-iig-test/{test_id}")
+async def delete_iig_test(test_id: int, id_admin: int = Query(0)):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        
+        cursor.execute("SELECT ten_de FROM de_thi_iig WHERE id = %s", (test_id,))
+        de_thi = cursor.fetchone()
+        
+        cursor.execute("DELETE FROM de_thi_iig WHERE id = %s", (test_id,))
+        
+        # --- LƯU NHẬT KÝ ---
+        if de_thi:
+            chi_tiet_log = f"Đã xóa vĩnh viễn đề thi IIG: '{de_thi[0]}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_DE_THI', %s)", (id_admin, chi_tiet_log))
+
+        db.commit()
+        db.close()
+        return {"status": "success", "message": "Đã xóa đề thi thành công!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 
 # ===========================================================
 # API ADMIN: QUẢN LÝ TÀI KHOẢN (GIÁO VIÊN -> LỚP -> HỌC SINH)
@@ -212,20 +254,6 @@ async def get_system_overview():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# ==========================================
-# API XÓA ĐỀ THI IIG
-# ==========================================
-@router.post("/delete-iig-test/{test_id}")
-async def delete_iig_test(test_id: int):
-    try:
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute("DELETE FROM de_thi_iig WHERE id = %s", (test_id,))
-        db.commit()
-        db.close()
-        return {"status": "success", "message": "Đã xóa đề thi thành công!"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
 
 # ===============================================
 # API THÊM/SỬA/XÓA TÀI KHOẢN (GIÁO VIÊN/HỌC SINH)
@@ -737,5 +765,50 @@ async def user_update_profile(acc_id: int, req: UpdateProfileModel):
         db.commit()
         db.close()
         return {"status": "success", "message": "Cập nhật thông tin cá nhân thành công!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ==========================================
+# 1. API ADMIN: XEM NHẬT KÝ THAO TÁC CỦA TẤT CẢ ADMIN
+# ==========================================
+@router.get("/get-admin-logs")
+async def get_all_admin_logs():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        sql = """
+            SELECT n.*, t.ten_dang_nhap, t.email 
+            FROM nhat_ky_hoat_dong n
+            LEFT JOIN tai_khoan t ON n.id_tai_khoan = t.id
+            WHERE n.vai_tro = 'admin'
+            ORDER BY n.thoi_gian DESC LIMIT 500
+        """
+        cursor.execute(sql)
+        logs = cursor.fetchall()
+        db.close()
+        return {"status": "success", "data": logs}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ==========================================
+# 2. API ADMIN: XEM NHẬT KÝ HỆ THỐNG (CHỈ GIÁO VIÊN & HỌC SINH)
+# ==========================================
+@router.get("/get-system-logs")
+async def get_system_logs():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        sql = """
+            SELECT n.*, t.ten_dang_nhap, t.email 
+            FROM nhat_ky_hoat_dong n
+            LEFT JOIN tai_khoan t ON n.id_tai_khoan = t.id
+            WHERE n.vai_tro IN ('teacher', 'student')
+            ORDER BY n.thoi_gian DESC LIMIT 500
+        """
+        cursor.execute(sql)
+        logs = cursor.fetchall()
+        db.close()
+        return {"status": "success", "data": logs}
     except Exception as e:
         return {"status": "error", "message": str(e)}

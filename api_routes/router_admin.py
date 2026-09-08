@@ -291,7 +291,7 @@ def tao_ten_dang_nhap(db_cursor, ten_hoc_sinh, ngay_sinh):
     return username
 
 @router.post("/add-account")
-async def add_account(acc: AccountModel):
+async def add_account(acc: AccountModel, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor()
@@ -330,6 +330,10 @@ async def add_account(acc: AccountModel):
             if getattr(acc, 'id_lop', None) is not None:
                 cursor.execute("INSERT INTO chi_tiet_lop_hoc (id_hoc_sinh, id_lop, trang_thai_hoc) VALUES (%s, %s, 'dang_hoc')", (new_acc_id, acc.id_lop))
                 
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã tạo tài khoản {acc.vai_tro} mới: '{acc.ten_dang_nhap}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TAI_KHOAN', %s)", (id_admin, chi_tiet_log))
+
         db.commit()
         db.close()
         
@@ -346,7 +350,7 @@ async def add_account(acc: AccountModel):
 
 
 @router.post("/update-account/{acc_id}")
-async def update_account(acc_id: int, acc: AccountModel):
+async def update_account(acc_id: int, acc: AccountModel, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor()
@@ -385,6 +389,10 @@ async def update_account(acc_id: int, acc: AccountModel):
             cursor.execute("UPDATE hoc_sinh SET ten_hoc_sinh = %s, ngay_sinh = %s, so_dien_thoai = %s WHERE id_tai_khoan = %s", 
                (acc.ten_hoc_sinh, acc.ngay_sinh, acc.so_dien_thoai, acc_id))
             
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã cập nhật thông tin tài khoản ID: #{acc_id}"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TAI_KHOAN', %s)", (id_admin, chi_tiet_log))
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã cập nhật tài khoản thành công!"}
@@ -393,12 +401,12 @@ async def update_account(acc_id: int, acc: AccountModel):
     
     
 @router.post("/delete-account/{acc_id}")
-async def delete_account(acc_id: int):
+async def delete_account(acc_id: int, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        cursor.execute("SELECT vai_tro FROM tai_khoan WHERE id = %s", (acc_id,))
+        cursor.execute("SELECT vai_tro, ten_dang_nhap FROM tai_khoan WHERE id = %s", (acc_id,))
         acc = cursor.fetchone()
         if not acc:
             return {"status": "error", "message": "Tài khoản không tồn tại."}
@@ -427,6 +435,11 @@ async def delete_account(acc_id: int):
 
         cursor.execute("DELETE FROM tai_khoan WHERE id = %s", (acc_id,))
 
+        # --- LƯU NHẬT KÝ ---
+        if acc:
+            chi_tiet_log = f"Đã xóa vĩnh viễn tài khoản {role}: '{acc['ten_dang_nhap']}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TAI_KHOAN', %s)", (id_admin, chi_tiet_log))
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã xóa sạch tài khoản và dữ liệu liên quan!"}
@@ -434,7 +447,7 @@ async def delete_account(acc_id: int):
         return {"status": "error", "message": str(e)}
 
 @router.post("/reset-password/{acc_id}")
-async def reset_password(acc_id: int):
+async def reset_password(acc_id: int, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor()
@@ -445,6 +458,10 @@ async def reset_password(acc_id: int):
         
         cursor.execute("UPDATE tai_khoan SET mat_khau = %s WHERE id = %s", (hashed_password, acc_id))
         
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã khôi phục mật khẩu mặc định (123456) cho tài khoản ID: #{acc_id}"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TAI_KHOAN', %s)", (id_admin, chi_tiet_log))
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã reset mật khẩu thành công!"}

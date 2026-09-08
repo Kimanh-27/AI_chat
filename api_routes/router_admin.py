@@ -473,7 +473,7 @@ async def reset_password(acc_id: int, id_admin: int = Query(0)):
 # API THÊM/SỬA/XÓA LỚP HỌC
 # ==========================================
 @router.post("/add-class")
-async def add_class(cls: ClassModel):
+async def add_class(cls: ClassModel, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor()
@@ -486,9 +486,11 @@ async def add_class(cls: ClassModel):
         cursor.execute("INSERT INTO lop_hoc (ten_lop, ma_tham_gia, id_giao_vien) VALUES (%s, %s, %s)", 
                (cls.ten_lop, cls.ma_tham_gia, cls.id_giao_vien))
                
-        # --- LƯU NHẬT KÝ ---
-        chi_tiet_log = f"Đã thêm lớp học mới: '{cls.ten_lop}'"
-        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (cls.id_giao_vien, chi_tiet_log))
+        # --- LƯU NHẬT KÝ ADMIN ---
+        actor_id = id_admin if id_admin > 0 else cls.id_giao_vien
+        role_type = 'admin' if id_admin > 0 else 'teacher'
+        chi_tiet_log = f"Đã thêm lớp học mới: '{cls.ten_lop}' cho giáo viên ID #{cls.id_giao_vien}"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, %s, 'QUAN_LY_LOP_HOC', %s)", (actor_id, role_type, chi_tiet_log))
 
         db.commit()
         db.close()
@@ -497,7 +499,7 @@ async def add_class(cls: ClassModel):
         return {"status": "error", "message": str(e)}
 
 @router.post("/update-class/{class_id}")
-async def update_class(class_id: int, cls: ClassModel):
+async def update_class(class_id: int, cls: ClassModel, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True) 
@@ -517,9 +519,11 @@ async def update_class(class_id: int, cls: ClassModel):
         cursor.execute("UPDATE lop_hoc SET ten_lop = %s, ma_tham_gia = %s WHERE id = %s", 
                (cls.ten_lop, cls.ma_tham_gia, class_id))
                
-        # --- LƯU NHẬT KÝ ---
+        # --- LƯU NHẬT KÝ ADMIN ---
+        actor_id = id_admin if id_admin > 0 else id_giao_vien
+        role_type = 'admin' if id_admin > 0 else 'teacher'
         chi_tiet_log = f"Đã sửa thông tin lớp: '{lop_hien_tai['ten_lop']}' thành '{cls.ten_lop}'"
-        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (id_giao_vien, chi_tiet_log))
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, %s, 'QUAN_LY_LOP_HOC', %s)", (actor_id, role_type, chi_tiet_log))
 
         db.commit()
         db.close()
@@ -528,7 +532,7 @@ async def update_class(class_id: int, cls: ClassModel):
         return {"status": "error", "message": str(e)}
 
 @router.post("/delete-class/{class_id}")
-async def delete_class(class_id: int):
+async def delete_class(class_id: int, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
@@ -548,10 +552,12 @@ async def delete_class(class_id: int):
 
         cursor.execute("DELETE FROM lop_hoc WHERE id = %s", (class_id,))
 
-        # --- LƯU NHẬT KÝ ---
+        # --- LƯU NHẬT KÝ ADMIN ---
         if lop_hien_tai:
+            actor_id = id_admin if id_admin > 0 else lop_hien_tai['id_giao_vien']
+            role_type = 'admin' if id_admin > 0 else 'teacher'
             chi_tiet_log = f"Đã xóa lớp: '{lop_hien_tai['ten_lop']}' và giải tán {len(student_acc_ids)} học sinh"
-            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (lop_hien_tai['id_giao_vien'], chi_tiet_log))
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, %s, 'QUAN_LY_LOP_HOC', %s)", (actor_id, role_type, chi_tiet_log))
 
         db.commit()
         db.close()

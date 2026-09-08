@@ -276,7 +276,6 @@ async def generate_passage_questions_api(req: QuestionRequest):
 # ===   HÀM KIỂM ĐỊNH TỰ ĐỘNG (LỚP 1 - VALIDATOR)           ===
 # =============================================================
 def validate_generated_batch(parsed_data, expected_count, is_passage=False):
-    """Kiểm tra xem AI có sinh đúng form và hợp logic đáp án không"""
     if not parsed_data or not isinstance(parsed_data, list):
         return False
         
@@ -303,8 +302,61 @@ def validate_generated_batch(parsed_data, expected_count, is_passage=False):
 # =============================================================
 
 # Hàm xử lý chạy ngầm
-async def build_200_questions_task(task_id: str, test_name: str):
+async def build_200_questions_task(task_id: str, test_name: str, image_data_list: list):
     try:
+        full_test_data = {}
+        nova_tasks[task_id]["message"] = "Đang phân tích 6 ảnh để sinh Part 1..."
+        full_test_data["part_1"] = []
+        config_p1 = TOEIC_CONFIG.get("part_1")
+        
+        try:
+            db_p1 = get_db_connection()
+            cursor_p1 = db_p1.cursor(dictionary=True)
+            cursor_p1.execute("SELECT id, ten_dang FROM danh_muc_dang_bai WHERE part = 'part_1'")
+            danh_sach_dang = cursor_p1.fetchall()
+            menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
+            db_p1.close()
+            
+            strict_rule = f"\nYÊU CẦU AUTO-TAGGING: Dựa vào nội dung bức ảnh, hãy tự phân tích xem nó thuộc dạng nào trong Menu dưới đây, và THÊM trường 'id_dang_bai' (chứa số ID tương ứng) vào JSON.\nMENU DẠNG BÀI HIỆN CÓ: [{menu_dang_bai}]."
+            system_prompt_p1 = config_p1["system_prompt"] + strict_rule
+        except Exception:
+            system_prompt_p1 = config_p1["system_prompt"]
+
+        for idx, img_info in enumerate(image_data_list):
+            nova_tasks[task_id]["message"] = f"Đang phân tích ảnh {idx + 1}/6 cho Part 1..."
+            try:
+                image_bytes = img_info['data']
+                image_parts = [{"mime_type": img_info['mime_type'], "data": image_bytes}]
+                
+                encoded_string = base64.b64encode(image_bytes).decode('utf-8')
+                img_data_uri = f"data:{img_info['mime_type']};base64,{encoded_string}"
+                
+                response = await pro_model.generate_content_async([image_parts[0], system_prompt_p1])
+                raw_text = response.text.strip()
+                
+                bt = "`" * 3
+                if raw_text.startswith(bt + "json"): raw_text = raw_text[7:]
+                elif raw_text.startswith(bt): raw_text = raw_text[3:]
+                if raw_text.endswith(bt): raw_text = raw_text[:-3]
+                raw_text = raw_text.strip()
+                
+                match = re.search(r'(\{.*\}|\[.*\])', raw_text, re.DOTALL)
+                clean_json = match.group(1) if match else raw_text
+                
+                parsed_data = json.loads(clean_json)
+                
+                if isinstance(parsed_data, list) and len(parsed_data) > 0:
+                    parsed_data[0]['hinh_anh'] = img_data_uri
+                    full_test_data["part_1"].extend(parsed_data)
+                elif isinstance(parsed_data, dict):
+                    parsed_data['hinh_anh'] = img_data_uri
+                    full_test_data["part_1"].append(parsed_data)
+                    
+            except Exception:
+                pass
+            
+            await asyncio.sleep(2)
+
         toeic_structure = [
             {"part": "part_2", "total": 25, "batch_size": 5, "is_passage": False, "desc": "Part 2"},
             {"part": "part_3", "total": 13, "batch_size": 1, "is_passage": True, "desc": "Part 3"},
@@ -314,8 +366,7 @@ async def build_200_questions_task(task_id: str, test_name: str):
             {"part": "part_7", "total": 15, "batch_size": 1, "is_passage": True, "desc": "Part 7"}
         ]
         
-        full_test_data = {}
-        total_steps = len(toeic_structure)
+        total_steps = len(toeic_structure) + 1
         
         for index, step in enumerate(toeic_structure):
             part_key = step["part"]
@@ -332,13 +383,12 @@ async def build_200_questions_task(task_id: str, test_name: str):
                 if b == num_batches - 1 and total_needed % batch_size != 0:
                     current_batch_size = total_needed % batch_size
                 
-                nova_tasks[task_id]["message"] = f"Đang sinh {step['desc']}... (Tiến độ: {b+1}/{num_batches})"
-                nova_tasks[task_id]["progress"] = int(((index + (b / num_batches)) / total_steps) * 100)
+                nova_tasks[task_id]["message"] = f"Đang sinh {step['desc']}... ({b+1}/{num_batches})"
+                nova_tasks[task_id]["progress"] = int(((index + 1 + (b / num_batches)) / total_steps) * 100)
                 
                 config = TOEIC_CONFIG.get(part_key)
                 system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size))
                 
-                # --- VÒNG LẶP RETRY NẾU AI SINH LỖI ---
                 max_retries = 3
                 batch_success = False
                 
@@ -350,40 +400,29 @@ async def build_200_questions_task(task_id: str, test_name: str):
                         match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
                         if match:
                             parsed_data = json.loads(match.group(1))
-                            
                             if validate_generated_batch(parsed_data, current_batch_size, is_passage):
                                 full_test_data[part_key].extend(parsed_data)
                                 batch_success = True
-                                break 
-                            else:
-                                print(f"⚠️ {part_key} lỗi logic đáp án/cấu trúc. Đang thử lại lần {attempt+1}")
-                    except Exception as e:
-                        print(f"⚠️ Lỗi Parse JSON ở {part_key}: {e}. Đang thử lại lần {attempt+1}")
+                                break
+                    except Exception:
+                        pass
                     
-                    await asyncio.sleep(2) 
+                    await asyncio.sleep(2)
                 
-                if not batch_success:
-                    print(f"❌ Bỏ qua 1 mẻ của {part_key} do AI liên tục sinh lỗi.")
-                
-                await asyncio.sleep(3) 
+                await asyncio.sleep(3)
 
         nova_tasks[task_id]["progress"] = 100
         nova_tasks[task_id]["status"] = "completed"
         
-        # ==========================================
-        # ĐOẠN LƯU DỮ LIỆU VÀO DATABASE (BẢNG de_thi_iig)
-        # ==========================================
         try:
             db = get_db_connection()
             cursor = db.cursor()
 
             dap_an_json_string = json.dumps(full_test_data, ensure_ascii=False)
-            nam_phat_hanh = 2026 
+            import datetime
+            nam_phat_hanh = datetime.date.today().year
             
-            sql = """
-                INSERT INTO de_thi_iig (ten_de, nguon_goc, nam_phat_hanh, dap_an_json) 
-                VALUES (%s, %s, %s, %s)
-            """
+            sql = "INSERT INTO de_thi_iig (ten_de, nguon_goc, nam_phat_hanh, dap_an_json) VALUES (%s, %s, %s, %s)"
             val = (test_name, 'ai_generated', nam_phat_hanh, dap_an_json_string)
             
             cursor.execute(sql, val)
@@ -392,7 +431,7 @@ async def build_200_questions_task(task_id: str, test_name: str):
             db.commit() 
             db.close()
             
-            nova_tasks[task_id]["message"] = f"✅ Đã tạo và LƯU thành công đề '{test_name}' (ID: #{id_de_thi_moi}) vào hệ thống!"
+            nova_tasks[task_id]["message"] = f"Đã tạo và LƯU thành công đề '{test_name}' (ID: #{id_de_thi_moi}) vào hệ thống!"
         
         except Exception as db_err:
             nova_tasks[task_id]["status"] = "error"
@@ -401,30 +440,38 @@ async def build_200_questions_task(task_id: str, test_name: str):
 
     except Exception as e:
         nova_tasks[task_id]["status"] = "error"
-        nova_tasks[task_id]["message"] = f"Lỗi ở bước sinh đề: {str(e)}"
+        nova_tasks[task_id]["message"] = str(e)
 
 
 @router.post("/generate-full-test")
-async def generate_full_test_api(background_tasks: BackgroundTasks, test_name: str = Form(...)):
+async def generate_full_test_api(
+    background_tasks: BackgroundTasks, 
+    test_name: str = Form(...),
+    images: List[UploadFile] = File(...)
+):
     try:
+        if len(images) != 6:
+            return {"status": "error", "message": "Phải có đúng 6 ảnh cho Part 1."}
+            
         task_id = str(uuid.uuid4())
+        nova_tasks[task_id] = {"status": "processing", "progress": 0, "message": "Đang nạp dữ liệu ảnh..."}
         
-        nova_tasks[task_id] = {
-            "status": "processing", 
-            "progress": 0, 
-            "message": "Đang khởi tạo bộ máy AI sinh đề...",
-            "test_name": test_name
-        }
-        
-        background_tasks.add_task(build_200_questions_task, task_id, test_name)
+        image_data_list = []
+        for img in images:
+            bytes_data = await img.read()
+            image_data_list.append({
+                "mime_type": img.content_type,
+                "data": bytes_data
+            })
+            
+        background_tasks.add_task(build_200_questions_task, task_id, test_name, image_data_list)
         
         return {
             "status": "success", 
-            "task_id": task_id, 
-            "message": "Tiến trình sinh đề TOEIC 200 câu đã bắt đầu chạy ngầm!"
+            "task_id": task_id
         }
     except Exception as e:
-        return {"status": "error", "message": f"Lỗi khởi tạo: {str(e)}"}
+        return {"status": "error", "message": str(e)}
 
 @router.get("/task-status/{task_id}")
 async def get_task_status_api(task_id: str):

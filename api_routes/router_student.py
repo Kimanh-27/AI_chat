@@ -101,11 +101,21 @@ async def save_history(data: HistoryData):
                 cursor.execute(sql_insert, (data.id_hoc_sinh, p, stats['diem'], stats['tong'], chi_tiet_json, data.id_bai_tap))
                 parts_logged.append(p.replace('part_', '').upper())
 
-        # --- LƯU NHẬT KÝ HỌC SINH ---
+        # --- LƯU NHẬT KÝ
         if parts_logged:
             chuoi_parts = ", ".join(parts_logged)
-            chi_tiet_log = f"Đã nộp bài tập ôn luyện (Part {chuoi_parts})"
-            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'student', 'LAM_BAI_TAP', %s)", (data.id_hoc_sinh, chi_tiet_log))
+            
+            if data.id_bai_tap: 
+                loai_hd = 'LAM_BAI_TAP'
+                chi_tiet_log = f"Đã hoàn thành bài tập được giao (Part {chuoi_parts})"
+            else: 
+                loai_hd = 'ON_LUYEN_TU_DO'
+                chi_tiet_log = f"Đã hoàn thành lượt tự ôn luyện (Part {chuoi_parts})"
+                
+            cursor.execute(
+                "INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'student', %s, %s)", 
+                (data.id_hoc_sinh, loai_hd, chi_tiet_log)
+            )
 
         conn.commit()
         cursor.close()

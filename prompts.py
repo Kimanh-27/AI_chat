@@ -16,13 +16,13 @@ BẠN BẮT BUỘC PHẢI TRẢ VỀ DỮ LIỆU DƯỚI DẠNG MẢNG JSON CÓ 
 [
   {
     "cau_hoi": "Look at the picture and choose the correct statement.",
-    "dap_an_a": "[Câu miêu tả A]",
-    "dap_an_b": "[Câu miêu tả B]",
-    "dap_an_c": "[Câu miêu tả C]",
-    "dap_an_d": "[Câu miêu tả D]",
-    "dap_an_dung": "[A, B, C hoặc D]",
-    "giai_thich": "[Giải thích chi tiết bằng tiếng Việt]",
-    "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
+    "dap_an_a": "He is putting on a jacket.",
+    "dap_an_b": "He is staring at the monitor.",
+    "dap_an_c": "He is typing on a keyboard.",
+    "dap_an_d": "He is moving a desk.",
+    "dap_an_dung": "B",
+    "giai_thich": "Phân tích bẫy: Hình ảnh người đàn ông đang mặc áo khoác (wear) và nhìn vào màn hình. Đáp án A sai vì 'putting on' là hành động ĐANG xỏ tay vào áo, trong khi ông ấy đã mặc xong (wearing). C sai vì tay không chạm bàn phím. B miêu tả đúng hành động nhìn (stare).",
+    "id_dang_bai": "[ID]"
   }
 ]"""
     },
@@ -44,14 +44,14 @@ YÊU CẦU QUAN TRỌNG VỀ ĐÁP ÁN VÀ GIẢI THÍCH (BẮT BUỘC):
 BẠN BẮT BUỘC PHẢI TRẢ VỀ MẢNG JSON THEO CẤU TRÚC:
 [
   {
-    "cau_hoi": "When is the next team meeting scheduled?",
-    "dap_an_a": "It's a very productive team.",
-    "dap_an_b": "We meet in Conference Room B.",
-    "dap_an_c": "I haven't checked the calendar yet.",
+    "cau_hoi": "Who has the key to the supply closet?",
+    "dap_an_a": "I'll lock the door.",
+    "dap_an_b": "The receptionist is at her desk.",
+    "dap_an_c": "Yes, we need more paper.",
     "dap_an_d": "",
-    "dap_an_dung": "C",
-    "giai_thich": "'When is the next team meeting scheduled?' (Khi nào thì cuộc họp nhóm tiếp theo được lên lịch?)\\n\\nPhân tích chi tiết:\\n\\nA. It's a very productive team.\\n* Sai. Đây là bẫy lặp từ 'team', không trả lời cho thời gian.\\n\\nB. We meet in Conference Room B.\\n* Sai. Câu này trả lời cho câu hỏi Where chứ không phải When.\\n\\nC. I haven't checked the calendar yet.\\n* Đúng. Đây là câu trả lời gián tiếp hợp lý, ngụ ý người nói không biết lịch.",
-    "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
+    "dap_an_dung": "B",
+    "giai_thich": "'Who has the key to the supply closet?' (Ai có chìa khóa tủ đồ?)\n\nPhân tích chi tiết:\n\nA. I'll lock the door.\n* Sai. Bẫy từ vựng liên quan (key - lock).\n\nB. The receptionist is at her desk.\n* Đúng. Trả lời gián tiếp xuất sắc, ngụ ý rằng lễ tân là người giữ chìa khóa và hãy ra bàn lễ tân mà lấy.\n\nC. Yes, we need more paper.\n* Sai. Câu hỏi Who không trả lời bằng Yes/No.",
+    "id_dang_bai": "[ID]"
   }
 ]"""
     },
@@ -73,17 +73,37 @@ Phải đảm bảo vị trí đáp án đúng (A, B, C, D) của 3 câu hỏi �
 TRẢ VỀ MỘT MẢNG JSON THEO CẤU TRÚC SAU:
 [
   {
-    "doan_van": "W: Did you receive the revised budget report?\\nM: Yes, but...\\n...",
+    "doan_van": "M: Hi Sarah, I'm calling about the caterer for Friday's banquet. They just called and said their delivery truck broke down.\nW: Oh no! The guests will be arriving at 6 PM. Can they find a replacement vehicle?\nM: They are trying, but it might take two hours. \nW: That won't work. I'll call the restaurant across the street to see if they can prepare some appetizers for now.",
     "danh_sach_cau_hoi": [
       {
-        "cau_hoi": "[Câu hỏi tiếng Anh]",
-        "dap_an_a": "[Đáp án A]", 
-        "dap_an_b": "[Đáp án B]", 
-        "dap_an_c": "[Đáp án C]", 
-        "dap_an_d": "[Đáp án D]",
-        "dap_an_dung": "[A, B, C, D]",
-        "giai_thich": "[Giải thích chi tiết BẰNG TIẾNG VIỆT]",
-        "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
+        "cau_hoi": "What is the problem?",
+        "dap_an_a": "A guest has cancelled.", 
+        "dap_an_b": "A delivery is delayed.", 
+        "dap_an_c": "A restaurant is closed.", 
+        "dap_an_d": "A truck is missing.",
+        "dap_an_dung": "B",
+        "giai_thich": "Người đàn ông đề cập rằng xe tải giao đồ ăn bị hỏng (truck broke down) khiến việc giao hàng bị chậm trễ.",
+        "id_dang_bai": "[ID]"
+      },
+      {
+        "cau_hoi": "What does the woman imply when she says, 'That won't work'?",
+        "dap_an_a": "She needs to leave work early.", 
+        "dap_an_b": "The proposed solution is too slow.", 
+        "dap_an_c": "The equipment is broken.", 
+        "dap_an_d": "She doesn't like the food.",
+        "dap_an_dung": "B",
+        "giai_thich": "Câu hỏi hàm ý. Xe mất 2 tiếng mới tới (8 PM), trong khi khách đến lúc 6 PM. Lời nói của người phụ nữ ngụ ý rằng giải pháp chờ đợi này là quá chậm trễ.",
+        "id_dang_bai": "[ID]"
+      },
+      {
+        "cau_hoi": "What will the woman probably do next?",
+        "dap_an_a": "Fix a vehicle.", 
+        "dap_an_b": "Contact another business.", 
+        "dap_an_c": "Greet the guests.", 
+        "dap_an_d": "Reschedule a banquet.",
+        "dap_an_dung": "B",
+        "giai_thich": "Bà ấy nói sẽ gọi cho nhà hàng đối diện (call the restaurant across the street), tương ứng với việc liên hệ một doanh nghiệp khác.",
+        "id_dang_bai": "[ID]"
       }
     ]
   }
@@ -106,17 +126,37 @@ Phải đảm bảo vị trí đáp án đúng (A, B, C, D) của 3 câu hỏi �
 TRẢ VỀ MỘT MẢNG JSON THEO CẤU TRÚC SAU:
 [
   {
-    "doan_van": "Hello, this is a message for... I'm calling about...",
+    "doan_van": "Attention all passengers waiting for flight 4B to Tokyo. This flight has been delayed due to severe weather conditions at our destination. We now expect to depart at 4:30 PM. In addition, the departure gate has been changed to Gate 22. We apologize for the inconvenience. Please see the desk agent if you need a meal voucher.",
     "danh_sach_cau_hoi": [
       {
-        "cau_hoi": "[Câu hỏi tiếng Anh]",
-        "dap_an_a": "[Đáp án A]", 
-        "dap_an_b": "[Đáp án B]", 
-        "dap_an_c": "[Đáp án C]", 
-        "dap_an_d": "[Đáp án D]",
-        "dap_an_dung": "[A, B, C, D]",
-        "giai_thich": "[Giải thích chi tiết BẰNG TIẾNG VIỆT]",
-        "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
+        "cau_hoi": "Why is the flight delayed?",
+        "dap_an_a": "There is a mechanical issue.", 
+        "dap_an_b": "The weather is bad.", 
+        "dap_an_c": "A crew member is late.", 
+        "dap_an_d": "The gate was changed.",
+        "dap_an_dung": "B",
+        "giai_thich": "Phân tích: Bài nghe đề cập 'due to severe weather conditions' (do điều kiện thời tiết khắc nghiệt), tương đương với 'bad weather'. Câu D là bẫy thông tin có nhắc đến trong bài nhưng không phải lý do trễ chuyến.",
+        "id_dang_bai": "[ID]"
+      },
+      {
+        "cau_hoi": "Where should passengers go now?",
+        "dap_an_a": "To the ticket counter", 
+        "dap_an_b": "To Gate 4B", 
+        "dap_an_c": "To Gate 22", 
+        "dap_an_d": "To the food court",
+        "dap_an_dung": "C",
+        "giai_thich": "Bài nghe thông báo 'departure gate has been changed to Gate 22' (cổng khởi hành đổi sang cổng 22). Câu B là bẫy lấy số hiệu chuyến bay (4B) làm số cổng.",
+        "id_dang_bai": "[ID]"
+      },
+      {
+        "cau_hoi": "What does the speaker imply when she says, 'Please see the desk agent'?",
+        "dap_an_a": "Passengers can get free food.", 
+        "dap_an_b": "Passengers must rebook their flights.", 
+        "dap_an_c": "Passengers need to check their luggage.", 
+        "dap_an_d": "Passengers should board immediately.",
+        "dap_an_dung": "A",
+        "giai_thich": "Câu hỏi hàm ý (Implication). Người nói bảo gặp nhân viên nếu cần 'meal voucher' (phiếu ăn). Việc phát phiếu ăn ngụ ý hành khách sẽ được nhận đồ ăn miễn phí (free food) trong lúc chờ đợi.",
+        "id_dang_bai": "[ID]"
       }
     ]
   }
@@ -137,14 +177,14 @@ Phải đảm bảo vị trí đáp án đúng (A, B, C, D) được phân bổ 
 BẠN BẮT BUỘC PHẢI TRẢ VỀ DỮ LIỆU DƯỚI DẠNG MẢNG JSON:
 [
   {
-    "cau_hoi": "The new software update will be installed _______ the maintenance window tonight.",
-    "dap_an_a": "while",
-    "dap_an_b": "during",
-    "dap_an_c": "as",
-    "dap_an_d": "until",
-    "dap_an_dung": "B",
-    "giai_thich": "Cần một giới từ đi với danh từ 'the maintenance window'. 'During' là lựa chọn duy nhất đúng cấu trúc.[Giải thích chi tiết ngữ pháp hoặc từ vựng BẰNG TIẾNG VIỆT]",
-    "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
+    "cau_hoi": "All employees are required to submit their expense reports _______ the end of the month to be reimbursed.",
+    "dap_an_a": "by",
+    "dap_an_b": "until",
+    "dap_an_c": "on",
+    "dap_an_d": "at",
+    "dap_an_dung": "A",
+    "giai_thich": "Phân tích bẫy: Câu này kiểm tra giới từ chỉ thời hạn. 'By + mốc thời gian' mang nghĩa là 'trước hoặc muộn nhất vào lúc'. Nhiều người hay nhầm với 'until' (cho đến khi - dùng cho hành động kéo dài liên tục). Ở đây nộp báo cáo (submit) là hành động dứt điểm nên bắt buộc dùng 'by'.",
+    "id_dang_bai": "[ID]"
   }
 ]"""
     },
@@ -168,17 +208,27 @@ LƯU Ý CỰC KỲ QUAN TRỌNG VỀ ĐỊNH DẠNG (BẮT BUỘC TUÂN THỦ):
 TRẢ VỀ MỘT MẢNG JSON THEO CẤU TRÚC SAU:
 [
   {
-    "doan_van": "Dear Team,\\nOur office will close early on Friday. (1) _______. Please ensure all systems are powered off before you leave. (2) _______...\\nRegards,\\nHR",
+    "doan_van": "Dear Employees,\nAs part of our commitment to sustainability, we are implementing a new recycling program. (1) _______. Starting next Monday, you will notice blue bins in every break room. (2) _______ bins are exclusively for paper and cardboard. Please do not put plastic items in them.\nThank you for your cooperation.",
     "danh_sach_cau_hoi": [
       {
         "cau_hoi": "(1) _______", 
-        "dap_an_a": "We will be hiring new staff.", 
-        "dap_an_b": "This is due to the upcoming national holiday.", 
-        "dap_an_c": "The meeting is canceled.", 
-        "dap_an_d": "Please submit your reports.",
-        "dap_an_dung": "B",
-        "giai_thich": "[Giải thích chi tiết lý do chọn đáp án BẰNG TIẾNG VIỆT]",
-        "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
+        "dap_an_a": "This initiative aims to reduce our office waste by 30%.", 
+        "dap_an_b": "The annual picnic has been delayed.", 
+        "dap_an_c": "We are hiring a new environmental officer.", 
+        "dap_an_d": "Please submit your vacation requests.",
+        "dap_an_dung": "A",
+        "giai_thich": "Đây là câu hỏi điền câu (Sentence Insertion). Câu trước nói về 'recycling program' (chương trình tái chế). Câu A giải thích mục đích của chương trình này (giảm 30% rác thải), tạo sự liên kết logic nhất.",
+        "id_dang_bai": "[ID]"
+      },
+      {
+        "cau_hoi": "(2) _______", 
+        "dap_an_a": "This", 
+        "dap_an_b": "That", 
+        "dap_an_c": "These", 
+        "dap_an_d": "Them",
+        "dap_an_dung": "C",
+        "giai_thich": "Từ cần điền đứng trước danh từ số nhiều 'bins'. 'These' (những cái này) là đại từ chỉ định số nhiều phù hợp nhất để thay thế cho 'blue bins' ở câu trước.",
+        "id_dang_bai": "[ID]"
       }
     ]
   }
@@ -213,17 +263,37 @@ LƯU Ý CỰC KỲ QUAN TRỌNG VỀ ĐỊNH DẠNG (BẮT BUỘC TUÂN THỦ):
 TRẢ VỀ MẢNG JSON THEO CẤU TRÚC SAU:
 [
   {
-    "doan_van": "[Nội dung đoạn văn bắt đầu ngay lập tức, không có câu mở đầu giới thiệu số câu hỏi...]",
+    "doan_van": "To: All Staff\nFrom: Facilities Management\nDate: September 8\nSubject: Parking Garage Closure\n\nPlease be advised that the underground parking garage will be closed from September 10 to September 12 for resurfacing. During this time, employees are encouraged to use the public parking lot on Elm Street. The company will validate parking tickets from the Elm Street lot, so you will not be charged. Normal garage operations will resume on Monday, September 15. We appreciate your patience as we work to maintain our facilities.",
     "danh_sach_cau_hoi": [
       {
-        "cau_hoi": "What is the main purpose of this email?",
-        "dap_an_a": "Đáp án A", 
-        "dap_an_b": "Đáp án B", 
-        "dap_an_c": "Đáp án C", 
-        "dap_an_d": "Đáp án D",
-        "dap_an_dung": "A",
-        "giai_thich": "[Giải thích chi tiết cách tìm thông tin BẰNG TIẾNG VIỆT]",
-        "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
+        "cau_hoi": "What is the main purpose of the email?",
+        "dap_an_a": "To announce a new employee",
+        "dap_an_b": "To notify staff of a temporary closure",
+        "dap_an_c": "To advertise a cleaning service",
+        "dap_an_d": "To request a payment for parking",
+        "dap_an_dung": "B",
+        "giai_thich": "Bài đọc thông báo bãi đỗ xe dưới hầm sẽ bị đóng cửa (closed) từ 10/9 đến 12/9. Điều này khớp với mục đích 'thông báo về việc đóng cửa tạm thời' (temporary closure).",
+        "id_dang_bai": "[ID]"
+      },
+      {
+        "cau_hoi": "When will the underground garage reopen?",
+        "dap_an_a": "September 8",
+        "dap_an_b": "September 10",
+        "dap_an_c": "September 12",
+        "dap_an_d": "September 15",
+        "dap_an_dung": "D",
+        "giai_thich": "Phân tích bẫy thời gian: Bãi đỗ xe đóng đến ngày 12 (C), ngày viết email là ngày 8 (A). Tuy nhiên câu cuối ghi rõ 'Normal garage operations will resume on Monday, September 15' (hoạt động bình thường sẽ khôi phục vào 15/9). Do đó ngày mở lại (reopen) phải là D.",
+        "id_dang_bai": "[ID]"
+      },
+      {
+        "cau_hoi": "The word 'validate' in paragraph 1 is closest in meaning to",
+        "dap_an_a": "confirm",
+        "dap_an_b": "pay for",
+        "dap_an_c": "question",
+        "dap_an_d": "replace",
+        "dap_an_dung": "B",
+        "giai_thich": "Câu hỏi từ vựng theo ngữ cảnh (Vocabulary-in-context). Thông thường 'validate' nghĩa là xác nhận (confirm), nhưng trong ngữ cảnh 'validate parking tickets... so you will not be charged' (để bạn không bị tính phí), nó mang nghĩa là công ty sẽ thanh toán chi trả (pay for) cho chiếc vé đó.",
+        "id_dang_bai": "[ID]"
       }
     ]
   }

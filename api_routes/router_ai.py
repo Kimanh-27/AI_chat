@@ -36,6 +36,11 @@ llm = ChatOpenAI(
     max_tokens=8192 
 )
 
+# Dùng cho Chatbot
+flash_model = genai.GenerativeModel('gemini-2.5-flash')
+
+pro_model = genai.GenerativeModel('gemini-2.5-pro')
+
 router = APIRouter()
 
 uploaded_docs_cache = {} 
@@ -87,10 +92,10 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
             image_bytes = await image.read()
             image_parts = [{"mime_type": image.content_type, "data": image_bytes}]
             
-            model = genai.GenerativeModel('gemini-2.5-flash')
+            model = pro_model
             response = await model.generate_content_async([image_parts[0], final_prompt])
         else:
-            model = genai.GenerativeModel('gemini-2.5-flash') 
+            model = pro_model
             response = await model.generate_content_async(final_prompt)
 
         raw_text = response.text.strip()
@@ -209,7 +214,7 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
 """
         system_prompt = config["system_prompt"] + strict_rule
         
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = pro_model
         
         print(f"Đang sinh {req.num_questions} câu cho {req.part} theo chuỗi tư duy mới...")
         response = await model.generate_content_async(system_prompt)
@@ -247,7 +252,7 @@ async def generate_passage_questions_api(req: QuestionRequest):
 
         system_prompt = config["system_prompt"] + f"\n\nYêu cầu bổ sung: Hãy sinh ra CHÍNH XÁC {req.num_questions} đoạn văn. Mỗi đoạn văn đi kèm 3 câu hỏi."
         
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = pro_model
         
         print(f"Đang sinh Đoạn văn + {req.num_questions} câu cho {req.part}...")
         response = model.generate_content(system_prompt)

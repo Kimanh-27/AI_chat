@@ -272,6 +272,173 @@ async def generate_passage_questions_api(req: QuestionRequest):
         return {"status": "error", "message": str(e)}
 
 
+# =============================================================
+# ===   HÀM KIỂM ĐỊNH TỰ ĐỘNG (LỚP 1 - VALIDATOR)           ===
+# =============================================================
+def validate_generated_batch(parsed_data, expected_count, is_passage=False):
+    """Kiểm tra xem AI có sinh đúng form và hợp logic đáp án không"""
+    if not parsed_data or not isinstance(parsed_data, list):
+        return False
+        
+    if len(parsed_data) != expected_count:
+        return False
+        
+    for item in parsed_data:
+        if is_passage:
+            if 'doan_van' not in item or 'danh_sach_cau_hoi' not in item:
+                return False
+            questions = item['danh_sach_cau_hoi']
+        else:
+            questions = [item]
+            
+        for q in questions:
+            if not all(k in q for k in ['cau_hoi', 'dap_an_a', 'dap_an_b', 'dap_an_c', 'dap_an_d', 'dap_an_dung']):
+                return False
+            if q['dap_an_dung'] not in ['A', 'B', 'C', 'D']:
+                return False
+    return True
+
+# =============================================================
+# ===   ORCHESTRATOR: SINH ĐỀ FULL 200 CÂU (CHẠY NGẦM)      ===
+# =============================================================
+
+# Hàm xử lý chạy ngầm
+async def build_200_questions_task(task_id: str, test_name: str):
+    try:
+        toeic_structure = [
+            {"part": "part_2", "total": 25, "batch_size": 5, "is_passage": False, "desc": "Part 2"},
+            {"part": "part_3", "total": 13, "batch_size": 1, "is_passage": True, "desc": "Part 3"},
+            {"part": "part_4", "total": 10, "batch_size": 1, "is_passage": True, "desc": "Part 4"},
+            {"part": "part_5", "total": 30, "batch_size": 5, "is_passage": False, "desc": "Part 5"},
+            {"part": "part_6", "total": 4,  "batch_size": 1, "is_passage": True, "desc": "Part 6"},
+            {"part": "part_7", "total": 15, "batch_size": 1, "is_passage": True, "desc": "Part 7"}
+        ]
+        
+        full_test_data = {}
+        total_steps = len(toeic_structure)
+        
+        for index, step in enumerate(toeic_structure):
+            part_key = step["part"]
+            full_test_data[part_key] = []
+            
+            total_needed = step["total"]
+            batch_size = step["batch_size"]
+            is_passage = step["is_passage"]
+            
+            num_batches = (total_needed + batch_size - 1) // batch_size 
+            
+            for b in range(num_batches):
+                current_batch_size = batch_size
+                if b == num_batches - 1 and total_needed % batch_size != 0:
+                    current_batch_size = total_needed % batch_size
+                
+                nova_tasks[task_id]["message"] = f"Đang sinh {step['desc']}... (Tiến độ: {b+1}/{num_batches})"
+                nova_tasks[task_id]["progress"] = int(((index + (b / num_batches)) / total_steps) * 100)
+                
+                config = TOEIC_CONFIG.get(part_key)
+                system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size))
+                
+                # --- VÒNG LẶP RETRY NẾU AI SINH LỖI ---
+                max_retries = 3
+                batch_success = False
+                
+                for attempt in range(max_retries):
+                    try:
+                        response = await pro_model.generate_content_async(system_prompt)
+                        raw_text = response.text.strip()
+                        
+                        match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
+                        if match:
+                            parsed_data = json.loads(match.group(1))
+                            
+                            if validate_generated_batch(parsed_data, current_batch_size, is_passage):
+                                full_test_data[part_key].extend(parsed_data)
+                                batch_success = True
+                                break 
+                            else:
+                                print(f"⚠️ {part_key} lỗi logic đáp án/cấu trúc. Đang thử lại lần {attempt+1}")
+                    except Exception as e:
+                        print(f"⚠️ Lỗi Parse JSON ở {part_key}: {e}. Đang thử lại lần {attempt+1}")
+                    
+                    await asyncio.sleep(2) 
+                
+                if not batch_success:
+                    print(f"❌ Bỏ qua 1 mẻ của {part_key} do AI liên tục sinh lỗi.")
+                
+                await asyncio.sleep(3) 
+
+        nova_tasks[task_id]["progress"] = 100
+        nova_tasks[task_id]["status"] = "completed"
+        
+        # ==========================================
+        # ĐOẠN LƯU DỮ LIỆU VÀO DATABASE (BẢNG de_thi_iig)
+        # ==========================================
+        try:
+            db = get_db_connection()
+            cursor = db.cursor()
+
+            dap_an_json_string = json.dumps(full_test_data, ensure_ascii=False)
+            nam_phat_hanh = 2026 
+            
+            sql = """
+                INSERT INTO de_thi_iig (ten_de, nguon_goc, nam_phat_hanh, dap_an_json) 
+                VALUES (%s, %s, %s, %s)
+            """
+            val = (test_name, 'ai_generated', nam_phat_hanh, dap_an_json_string)
+            
+            cursor.execute(sql, val)
+            id_de_thi_moi = cursor.lastrowid
+
+            db.commit() 
+            db.close()
+            
+            nova_tasks[task_id]["message"] = f"✅ Đã tạo và LƯU thành công đề '{test_name}' (ID: #{id_de_thi_moi}) vào hệ thống!"
+        
+        except Exception as db_err:
+            nova_tasks[task_id]["status"] = "error"
+            nova_tasks[task_id]["message"] = f"Lỗi khi lưu vào Database: {str(db_err)}"
+            if 'db' in locals(): db.close()
+
+    except Exception as e:
+        nova_tasks[task_id]["status"] = "error"
+        nova_tasks[task_id]["message"] = f"Lỗi ở bước sinh đề: {str(e)}"
+
+
+@router.post("/generate-full-test")
+async def generate_full_test_api(background_tasks: BackgroundTasks, test_name: str = Form(...)):
+    try:
+        task_id = str(uuid.uuid4())
+        
+        nova_tasks[task_id] = {
+            "status": "processing", 
+            "progress": 0, 
+            "message": "Đang khởi tạo bộ máy AI sinh đề...",
+            "test_name": test_name
+        }
+        
+        background_tasks.add_task(build_200_questions_task, task_id, test_name)
+        
+        return {
+            "status": "success", 
+            "task_id": task_id, 
+            "message": "Tiến trình sinh đề TOEIC 200 câu đã bắt đầu chạy ngầm!"
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Lỗi khởi tạo: {str(e)}"}
+
+@router.get("/task-status/{task_id}")
+async def get_task_status_api(task_id: str):
+    task = nova_tasks.get(task_id)
+    if not task:
+        return {"status": "error", "message": "Không tìm thấy tiến trình sinh đề này."}
+    
+    if task["status"] in ["completed", "error"]:
+        response_data = task.copy()
+        del nova_tasks[task_id] 
+        return {"status": "success", "data": response_data}
+        
+    return {"status": "success", "data": task}
+
 #=============================================================
 #===      LƯU BỘ CÂU HỎI AI SINH     ==========
 #=============================================================

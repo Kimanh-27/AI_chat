@@ -561,7 +561,8 @@ async def add_announcement(req: ThongBaoLopModel):
         gv = cursor.fetchone()
         if gv:
             chi_tiet_log = f"Đã thêm thông báo mới: '{req.tieu_de}'"
-            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (gv[0], chi_tiet_log))        db.commit()
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_LOP_HOC', %s)", (gv[0], chi_tiet_log))        
+            db.commit()
         db.close()
         return {"status": "success", "message": "Đã gửi thông báo cho lớp thành công!"}
     except Exception as e:
@@ -749,7 +750,8 @@ async def update_vocab(id_tu: int, req: TuVungModel):
 
         # --- LƯU NHẬT KÝ ---
         chi_tiet_log = f"Đã sửa từ vựng thành: '{req.tu}'"
-        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_TU_VUNG', %s)", (req.id_giao_vien, chi_tiet_log))        conn.commit()
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_TU_VUNG', %s)", (req.id_giao_vien, chi_tiet_log))        
+        conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã cập nhật từ vựng!"}
     except Exception as e:

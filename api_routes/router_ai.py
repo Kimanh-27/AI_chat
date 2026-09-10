@@ -36,6 +36,10 @@ llm = ChatOpenAI(
     temperature=0.5,
     max_tokens=8192 
 )
+# Dùng cho Chatbot
+flash_model = genai.GenerativeModel('gemini-2.5-flash')
+
+pro_model = genai.GenerativeModel('gemini-2.5-pro')
 
 router = APIRouter()
 
@@ -88,10 +92,10 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
             image_bytes = await image.read()
             image_parts = [{"mime_type": image.content_type, "data": image_bytes}]
             
-            model = genai.GenerativeModel('gemini-3.6-flash')
+            model = pro_model            
             response = await model.generate_content_async([image_parts[0], final_prompt])
         else:
-            model = genai.GenerativeModel('gemini-3.6-flash') 
+            model = pro_model            
             response = await model.generate_content_async(final_prompt)
 
         raw_text = response.text.strip()
@@ -125,7 +129,7 @@ async def generate_part1_api(files: List[UploadFile] = File(...)):
 
         strict_rule = f"\nYÊU CẦU AUTO-TAGGING: Dựa vào nội dung bức ảnh, hãy tự phân tích xem nó thuộc dạng nào trong Menu dưới đây, và THÊM trường 'id_dang_bai' (chứa số ID tương ứng) vào JSON.\nMENU DẠNG BÀI HIỆN CÓ: [{menu_dang_bai}]."
         system_prompt = config["system_prompt"] + strict_rule
-        model = genai.GenerativeModel('gemini-3.6-flash')
+        model = pro_model
         
         danh_sach_cau_hoi = [] 
         
@@ -210,7 +214,7 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
 """
         system_prompt = config["system_prompt"] + strict_rule
         
-        model = genai.GenerativeModel('gemini-3.6-flash')
+        model = pro_model
         
         print(f"Đang sinh {req.num_questions} câu cho {req.part} theo chuỗi tư duy mới...")
         response = await model.generate_content_async(system_prompt)
@@ -267,6 +271,220 @@ async def generate_passage_questions_api(req: QuestionRequest):
         print(f"Lỗi sinh đề chùm: {e}")
         return {"status": "error", "message": str(e)}
 
+# =============================================================
+# ===   HÀM KIỂM ĐỊNH TỰ ĐỘNG (LỚP 1 - VALIDATOR)           ===
+# =============================================================
+def validate_generated_batch(parsed_data, expected_count, is_passage=False):
+    if not parsed_data or not isinstance(parsed_data, list):
+        return False
+
+    if len(parsed_data) != expected_count:
+        return False
+
+    for item in parsed_data:
+        if is_passage:
+            if 'doan_van' not in item or 'danh_sach_cau_hoi' not in item:
+                return False
+            questions = item['danh_sach_cau_hoi']
+        else:
+            questions = [item]
+
+        for q in questions:
+            if not all(k in q for k in ['cau_hoi', 'dap_an_a', 'dap_an_b', 'dap_an_c', 'dap_an_d', 'dap_an_dung']):
+                return False
+            if q['dap_an_dung'] not in ['A', 'B', 'C', 'D']:
+                return False
+    return True
+
+# =============================================================
+# ===   ORCHESTRATOR: SINH ĐỀ FULL 200 CÂU (CHẠY NGẦM)      ===
+# =============================================================
+
+# Hàm xử lý chạy ngầm
+async def build_200_questions_task(task_id: str, test_name: str, image_data_list: list):
+    try:
+        full_test_data = {}
+        nova_tasks[task_id]["message"] = "Đang phân tích 6 ảnh để sinh Part 1..."
+        full_test_data["part_1"] = []
+        config_p1 = TOEIC_CONFIG.get("part_1")
+
+        try:
+            db_p1 = get_db_connection()
+            cursor_p1 = db_p1.cursor(dictionary=True)
+            cursor_p1.execute("SELECT id, ten_dang FROM danh_muc_dang_bai WHERE part = 'part_1'")
+            danh_sach_dang = cursor_p1.fetchall()
+            menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
+            db_p1.close()
+
+            strict_rule = f"\nYÊU CẦU AUTO-TAGGING: Dựa vào nội dung bức ảnh, hãy tự phân tích xem nó thuộc dạng nào trong Menu dưới đây, và THÊM trường 'id_dang_bai' (chứa số ID tương ứng) vào JSON.\nMENU DẠNG BÀI HIỆN CÓ: [{menu_dang_bai}]."
+            system_prompt_p1 = config_p1["system_prompt"] + strict_rule
+        except Exception:
+            system_prompt_p1 = config_p1["system_prompt"]
+
+        for idx, img_info in enumerate(image_data_list):
+            nova_tasks[task_id]["message"] = f"Đang phân tích ảnh {idx + 1}/6 cho Part 1..."
+            try:
+                image_bytes = img_info['data']
+                image_parts = [{"mime_type": img_info['mime_type'], "data": image_bytes}]
+
+                encoded_string = base64.b64encode(image_bytes).decode('utf-8')
+                img_data_uri = f"data:{img_info['mime_type']};base64,{encoded_string}"
+
+                response = await pro_model.generate_content_async([image_parts[0], system_prompt_p1])
+                raw_text = response.text.strip()
+
+                bt = "`" * 3
+                if raw_text.startswith(bt + "json"): raw_text = raw_text[7:]
+                elif raw_text.startswith(bt): raw_text = raw_text[3:]
+                if raw_text.endswith(bt): raw_text = raw_text[:-3]
+                raw_text = raw_text.strip()
+
+                match = re.search(r'(\{.*\}|\[.*\])', raw_text, re.DOTALL)
+                clean_json = match.group(1) if match else raw_text
+
+                parsed_data = json.loads(clean_json)
+
+                if isinstance(parsed_data, list) and len(parsed_data) > 0:
+                    parsed_data[0]['hinh_anh'] = img_data_uri
+                    full_test_data["part_1"].extend(parsed_data)
+                elif isinstance(parsed_data, dict):
+                    parsed_data['hinh_anh'] = img_data_uri
+                    full_test_data["part_1"].append(parsed_data)
+
+            except Exception:
+                pass
+
+            await asyncio.sleep(2)
+
+        toeic_structure = [
+            {"part": "part_2", "total": 25, "batch_size": 5, "is_passage": False, "desc": "Part 2"},
+            {"part": "part_3", "total": 13, "batch_size": 1, "is_passage": True, "desc": "Part 3"},
+            {"part": "part_4", "total": 10, "batch_size": 1, "is_passage": True, "desc": "Part 4"},
+            {"part": "part_5", "total": 30, "batch_size": 5, "is_passage": False, "desc": "Part 5"},
+            {"part": "part_6", "total": 4,  "batch_size": 1, "is_passage": True, "desc": "Part 6"},
+            {"part": "part_7", "total": 15, "batch_size": 1, "is_passage": True, "desc": "Part 7"}
+        ]
+
+        total_steps = len(toeic_structure) + 1
+
+        for index, step in enumerate(toeic_structure):
+            part_key = step["part"]
+            full_test_data[part_key] = []
+
+            total_needed = step["total"]
+            batch_size = step["batch_size"]
+            is_passage = step["is_passage"]
+
+            num_batches = (total_needed + batch_size - 1) // batch_size 
+
+            for b in range(num_batches):
+                current_batch_size = batch_size
+                if b == num_batches - 1 and total_needed % batch_size != 0:
+                    current_batch_size = total_needed % batch_size
+
+                nova_tasks[task_id]["message"] = f"Đang sinh {step['desc']}... ({b+1}/{num_batches})"
+                nova_tasks[task_id]["progress"] = int(((index + 1 + (b / num_batches)) / total_steps) * 100)
+
+                config = TOEIC_CONFIG.get(part_key)
+                system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size))
+
+                max_retries = 3
+                batch_success = False
+
+                for attempt in range(max_retries):
+                    try:
+                        response = await pro_model.generate_content_async(system_prompt)
+                        raw_text = response.text.strip()
+
+                        match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
+                        if match:
+                            parsed_data = json.loads(match.group(1))
+                            if validate_generated_batch(parsed_data, current_batch_size, is_passage):
+                                full_test_data[part_key].extend(parsed_data)
+                                batch_success = True
+                                break
+                    except Exception:
+                        pass
+
+                    await asyncio.sleep(2)
+
+                await asyncio.sleep(3)
+
+        nova_tasks[task_id]["progress"] = 100
+        nova_tasks[task_id]["status"] = "completed"
+
+        try:
+            db = get_db_connection()
+            cursor = db.cursor()
+
+            dap_an_json_string = json.dumps(full_test_data, ensure_ascii=False)
+            import datetime
+            nam_phat_hanh = datetime.date.today().year
+
+            sql = "INSERT INTO de_thi_iig (ten_de, nguon_goc, nam_phat_hanh, dap_an_json) VALUES (%s, %s, %s, %s)"
+            val = (test_name, 'ai_generated', nam_phat_hanh, dap_an_json_string)
+
+            cursor.execute(sql, val)
+            id_de_thi_moi = cursor.lastrowid
+
+            db.commit() 
+            db.close()
+
+            nova_tasks[task_id]["message"] = f"Đã tạo và LƯU thành công đề '{test_name}' (ID: #{id_de_thi_moi}) vào hệ thống!"
+
+        except Exception as db_err:
+            nova_tasks[task_id]["status"] = "error"
+            nova_tasks[task_id]["message"] = f"Lỗi khi lưu vào Database: {str(db_err)}"
+            if 'db' in locals(): db.close()
+
+    except Exception as e:
+        nova_tasks[task_id]["status"] = "error"
+        nova_tasks[task_id]["message"] = str(e)
+
+
+@router.post("/generate-full-test")
+async def generate_full_test_api(
+    background_tasks: BackgroundTasks, 
+    test_name: str = Form(...),
+    images: List[UploadFile] = File(...)
+):
+    try:
+        if len(images) != 6:
+            return {"status": "error", "message": "Phải có đúng 6 ảnh cho Part 1."}
+
+        task_id = str(uuid.uuid4())
+        nova_tasks[task_id] = {"status": "processing", "progress": 0, "message": "Đang nạp dữ liệu ảnh..."}
+
+        image_data_list = []
+        for img in images:
+            bytes_data = await img.read()
+            image_data_list.append({
+                "mime_type": img.content_type,
+                "data": bytes_data
+            })
+
+        background_tasks.add_task(build_200_questions_task, task_id, test_name, image_data_list)
+
+        return {
+            "status": "success", 
+            "task_id": task_id
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.get("/task-status/{task_id}")
+async def get_task_status_api(task_id: str):
+    task = nova_tasks.get(task_id)
+    if not task:
+        return {"status": "error", "message": "Không tìm thấy tiến trình sinh đề này."}
+
+    if task["status"] in ["completed", "error"]:
+        response_data = task.copy()
+        del nova_tasks[task_id] 
+        return {"status": "success", "data": response_data}
+
+    return {"status": "success", "data": task}
+
 
 #=============================================================
 #===      LƯU BỘ CÂU HỎI AI SINH     ==========
@@ -285,6 +503,11 @@ async def save_practice_questions(questions: List[PracticeQuestion]):
             val = (q.id_giao_vien, q.id_dang_bai, q.part, q.hinh_anh, q.doan_van_text, q.cau_hoi, 
                    q.dap_an_a, q.dap_an_b, q.dap_an_c, q.dap_an_d, q.dap_an_dung, q.giai_thich)
             cursor.execute(sql, val)
+        # --- LƯU NHẬT KÝ ---
+        if questions:
+            id_gv = questions[0].id_giao_vien
+            chi_tiet_log = f"Đã duyệt và lưu thành công {len(questions)} câu hỏi ôn luyện mới"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_CAU_HOI', %s)", (id_gv, chi_tiet_log))
 
         db.commit()
         cursor.close()
@@ -303,7 +526,17 @@ async def delete_question(q_id: int):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        cursor.execute("SELECT id_giao_vien FROM ngan_hang_cau_hoi WHERE id = %s", (q_id,))
+        gv_info = cursor.fetchone()
+
         cursor.execute("DELETE FROM ngan_hang_cau_hoi WHERE id = %s", (q_id,))
+
+        # --- LƯU NHẬT KÝ ---
+        if gv_info:
+            chi_tiet_log = f"Đã xóa câu hỏi ID: #{q_id} khỏi Ngân hàng"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_CAU_HOI', %s)", (gv_info[0], chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Đã xóa câu hỏi thành công!"}
@@ -316,7 +549,8 @@ async def update_question(q_id: int, q: UpdateQuestionModel):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+        cursor.execute("SELECT id_giao_vien FROM ngan_hang_cau_hoi WHERE id = %s", (q_id,))
+        gv_info = cursor.fetchone()
         sql = """UPDATE ngan_hang_cau_hoi SET 
                  doan_van=%s, cau_hoi=%s, dap_an_a=%s, dap_an_b=%s, 
                  dap_an_c=%s, dap_an_d=%s, dap_an_dung=%s, giai_thich=%s 
@@ -325,6 +559,12 @@ async def update_question(q_id: int, q: UpdateQuestionModel):
                q.dap_an_d, q.dap_an_dung, q.giai_thich, q_id)
         
         cursor.execute(sql, val)
+
+        # --- LƯU NHẬT KÝ ---
+        if gv_info:
+            chi_tiet_log = f"Đã cập nhật nội dung câu hỏi ID: #{q_id}"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_CAU_HOI', %s)", (gv_info[0], chi_tiet_log))
+
         conn.commit()
         conn.close()
         return {"status": "success", "message": "Cập nhật thành công!"}

@@ -100,12 +100,27 @@ async def save_history(data: HistoryData):
             part_stats[actual_part]['chi_tiet'].append(item)
 
         sql_insert = "INSERT INTO lich_su_lam_bai (id_hoc_sinh, part, diem_so, tong_so_cau, chi_tiet_bai_lam, id_bai_tap) VALUES (%s, %s, %s, %s, %s, %s)"
-        
+        parts_logged = []
         for p, stats in part_stats.items():
             if stats['tong'] > 0:
                 chi_tiet_json = json.dumps(stats['chi_tiet'])
                 cursor.execute(sql_insert, (data.id_hoc_sinh, p, stats['diem'], stats['tong'], chi_tiet_json, data.id_bai_tap))
 
+        # --- LƯU NHẬT KÝ
+        if parts_logged:
+            chuoi_parts = ", ".join(parts_logged)
+
+            if data.id_bai_tap: 
+                loai_hd = 'LAM_BAI_TAP'
+                chi_tiet_log = f"Đã hoàn thành bài tập được giao (Part {chuoi_parts})"
+            else: 
+                loai_hd = 'ON_LUYEN_TU_DO'
+                chi_tiet_log = f"Đã hoàn thành lượt tự ôn luyện (Part {chuoi_parts})"
+
+            cursor.execute(
+                "INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'student', %s, %s)", 
+                (data.id_hoc_sinh, loai_hd, chi_tiet_log)
+            )        
         conn.commit()
         cursor.close()
         conn.close()
@@ -194,12 +209,12 @@ async def get_student_practice_questions(part_name: str, id_hoc_sinh: int):
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        
+        # ĐÃ SỬA: Lấy id_giao_vien thông qua bảng chi_tiet_lop_hoc        
         cursor.execute("""
             SELECT l.id_giao_vien 
-            FROM hoc_sinh h 
-            JOIN lop_hoc l ON h.id_lop = l.id 
-            WHERE h.id_tai_khoan = %s
+            FROM chi_tiet_lop_hoc c 
+            JOIN lop_hoc l ON c.id_lop = l.id 
+            WHERE c.id_hoc_sinh = %s        
         """, (id_hoc_sinh,))
         gv_info = cursor.fetchone()
         
@@ -250,7 +265,7 @@ async def submit_iig_test(data: IIGSubmitData):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        cursor.execute("SELECT dap_an_json FROM de_thi_iig WHERE id = %s", (data.id_de_thi,))
+        cursor.execute("SELECT ten_de, dap_an_json FROM de_thi_iig WHERE id = %s", (data.id_de_thi,))
         de_thi = cursor.fetchone()
         
         if not de_thi:
@@ -280,14 +295,12 @@ async def submit_iig_test(data: IIGSubmitData):
                 "is_correct": is_correct
             })
             
-        if so_cau_nghe == 0:
-            diem_nghe = 5
+        if so_cau_nghe == 0: diem_nghe = 5
         else:
             diem_nghe = min(so_cau_nghe * 5, 495)
             if diem_nghe < 5: diem_nghe = 5 
             
-        if so_cau_doc == 0:
-            diem_doc = 5
+        if so_cau_doc == 0: diem_doc = 5
         else:
             diem_doc = min(so_cau_doc * 5, 495)
             if diem_doc < 5: diem_doc = 5 
@@ -300,7 +313,9 @@ async def submit_iig_test(data: IIGSubmitData):
         
         cursor.execute(sql, (data.id_hoc_sinh, data.id_de_thi, so_cau_nghe, so_cau_doc, diem_nghe, diem_doc, tong_diem, json.dumps(chi_tiet_bai_lam)))
         id_ket_qua = cursor.lastrowid
-        
+        # --- LƯU NHẬT KÝ HỌC SINH ---
+        chi_tiet_log = f"Đã hoàn thành thi thử đề '{de_thi['ten_de']}' (Đạt: {tong_diem} điểm)"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'student', 'LAM_BAI_THI', %s)", (data.id_hoc_sinh, chi_tiet_log))
         db.commit()
         cursor.close()
         db.close()
@@ -390,7 +405,7 @@ async def get_student_class_notices(acc_id: int):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        cursor.execute("SELECT id_lop FROM hoc_sinh WHERE id_tai_khoan = %s", (acc_id,))
+        cursor.execute("SELECT id_lop FROM chi_tiet_lop_hoc WHERE id_hoc_sinh = %s", (acc_id,))        
         hs = cursor.fetchone()
         
         if not hs or not hs['id_lop']:
@@ -415,12 +430,12 @@ async def get_student_vocab_topics(acc_id: int):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        # Lấy id_giao_vien đang dạy học sinh này thông qua bảng lop_hoc
+        # ĐÃ SỬA: Nối qua bảng chi_tiet_lop_hoc để lấy id_giao_vien của lớp
         sql_get_gv = """
             SELECT l.id_giao_vien 
-            FROM hoc_sinh h 
-            JOIN lop_hoc l ON h.id_lop = l.id 
-            WHERE h.id_tai_khoan = %s
+            FROM chi_tiet_lop_hoc c 
+            JOIN lop_hoc l ON c.id_lop = l.id 
+            WHERE c.id_hoc_sinh = %s
         """
         cursor.execute(sql_get_gv, (acc_id,))
         gv_info = cursor.fetchone()
@@ -430,7 +445,6 @@ async def get_student_vocab_topics(acc_id: int):
             
         id_giao_vien = gv_info['id_giao_vien']
         
-        # Lấy tất cả chủ đề của giáo viên đó, kèm số lượng từ
         sql_topics = """
             SELECT c.id, c.chu_de, COUNT(t.id) as so_tu 
             FROM chu_de_tu_vung c
@@ -511,7 +525,8 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
         """
 
         model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
+        # ĐÃ SỬA: Đổi sang gọi AI bất đồng bộ (async) để server không bị nghẽn
+        response = await model.generate_content_async(prompt) 
         
         raw_text = response.text.strip()
         
@@ -573,8 +588,8 @@ async def generate_matching(topic_id: int, limit: int = Query(5, le=15)):
         """
 
         model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
-        
+        # ĐÃ SỬA: Đổi sang gọi AI bất đồng bộ
+        response = await model.generate_content_async(prompt)        
         cleaned_text = response.text.replace("```json", "").replace("```", "").strip()
         data = json.loads(cleaned_text)
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, Query
 from database import get_db_connection
 import uuid
 import shutil
@@ -26,6 +26,7 @@ async def upload_iig(
     ten_de: str = Form(...),
     nam_phat_hanh: int = Form(...),
     dap_an_json: str = Form(...),
+    id_admin: int = Form(0), # Mặc định là 0 nếu UI chưa truyền
     file_pdf: UploadFile = File(...),
     file_audio: UploadFile = File(None)
 ):
@@ -48,6 +49,10 @@ async def upload_iig(
                  VALUES (%s, %s, %s, %s, %s)"""
         cursor.execute(sql, (ten_de, nam_phat_hanh, f"{pdf_path}", 
                      f"{audio_path}" if audio_path else None, dap_an_json))
+
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã tải lên đề thi IIG: '{ten_de}' (Năm {nam_phat_hanh})"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_DE_THI', %s)", (id_admin, chi_tiet_log))
         db.commit()
         cursor.close()
         db.close()
@@ -91,14 +96,20 @@ async def get_single_iig_test(test_id: int):
 
 # API CẬP NHẬT LẠI ĐÁP ÁN CHO ĐỀ IIG
 @router.post("/update-iig-answers/{test_id}")
-async def update_iig_answers(test_id: int, req: UpdateAnswersModel):
+async def update_iig_answers(test_id: int, req: UpdateAnswersModel, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor()
-        
+        # Lấy tên đề để ghi log cho rõ ràng
+        cursor.execute("SELECT ten_de FROM de_thi_iig WHERE id = %s", (test_id,))
+        de_thi = cursor.fetchone()
         cursor.execute("UPDATE de_thi_iig SET dap_an_json = %s WHERE id = %s", (req.dap_an_json, test_id))
+        # --- LƯU NHẬT KÝ ---
+        if de_thi:
+            chi_tiet_log = f"Đã cập nhật lại khóa đáp án cho đề: '{de_thi[0]}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_DE_THI', %s)", (id_admin, chi_tiet_log))
+
         db.commit()
-        
         cursor.close()
         db.close()
         return {"status": "success", "message": "Đã cập nhật lại khóa đáp án thành công!"}
@@ -134,9 +145,9 @@ async def get_classes_by_teacher(teacher_id: int):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         sql = """
-            SELECT l.id, l.ten_lop, l.ma_tham_gia, COUNT(h.id_tai_khoan) as so_luong_hoc_sinh 
+            SELECT l.id, l.ten_lop, l.ma_tham_gia, COUNT(c.id_hoc_sinh) as so_luong_hoc_sinh 
             FROM lop_hoc l 
-            LEFT JOIN hoc_sinh h ON l.id = h.id_lop 
+            LEFT JOIN chi_tiet_lop_hoc c ON l.id = c.id_lop  
             WHERE l.id_giao_vien = %s 
             GROUP BY l.id
         """
@@ -155,9 +166,9 @@ async def get_students_by_class(class_id: int):
         sql = """
             SELECT h.id as id_hoc_sinh, h.ten_hoc_sinh, h.ngay_sinh, h.so_dien_thoai, 
                 t.id as id_tai_khoan, t.ten_dang_nhap, t.email
-            FROM hoc_sinh h
-            JOIN tai_khoan t ON h.id_tai_khoan = t.id
-            WHERE h.id_lop = %s
+            FROM chi_tiet_lop_hoc c
+            JOIN hoc_sinh h ON c.id_hoc_sinh = h.id_tai_khoan
+            WHERE c.id_lop = %s
         """
         cursor.execute(sql, (class_id,))
         students = cursor.fetchall()
@@ -213,21 +224,6 @@ async def get_system_overview():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# ==========================================
-# API XÓA ĐỀ THI IIG
-# ==========================================
-@router.post("/delete-iig-test/{test_id}")
-async def delete_iig_test(test_id: int):
-    try:
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute("DELETE FROM de_thi_iig WHERE id = %s", (test_id,))
-        db.commit()
-        db.close()
-        return {"status": "success", "message": "Đã xóa đề thi thành công!"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
 # ===============================================
 # API THÊM/SỬA/XÓA TÀI KHOẢN (GIÁO VIÊN/HỌC SINH)
 # ===============================================
@@ -264,18 +260,16 @@ def tao_ten_dang_nhap(db_cursor, ten_hoc_sinh, ngay_sinh):
     return username
 
 @router.post("/add-account")
-async def add_account(acc: AccountModel):
+async def add_account(acc: AccountModel, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor()
-        # 1. BẮT LỖI TRÙNG EMAIL
         if acc.email and acc.email.strip() != "":
             cursor.execute("SELECT id FROM tai_khoan WHERE email = %s", (acc.email.strip(),))
             if cursor.fetchone():
                 db.close()
                 return {"status": "error", "message": "Email này đã được sử dụng trên hệ thống!"}
         if acc.vai_tro == 'teacher':
-            # bắt lỗi trùng Tên đăng nhập
             if acc.ten_dang_nhap and acc.ten_dang_nhap.strip() != "":
                 cursor.execute("SELECT id FROM tai_khoan WHERE ten_dang_nhap = %s", (acc.ten_dang_nhap.strip(),))
                 if cursor.fetchone():
@@ -286,7 +280,6 @@ async def add_account(acc: AccountModel):
                 acc.mat_khau = "123456"
                 
         elif acc.vai_tro == 'student':
-            # bắt lỗi trùng số điện thoại
             if acc.so_dien_thoai and acc.so_dien_thoai.strip() != "":
                 cursor.execute("SELECT id_tai_khoan FROM hoc_sinh WHERE so_dien_thoai = %s", (acc.so_dien_thoai.strip(),))
                 if cursor.fetchone():
@@ -303,9 +296,15 @@ async def add_account(acc: AccountModel):
         cursor.execute(sql, (acc.ten_dang_nhap, acc.email, hashed_password, acc.vai_tro))
         new_acc_id = cursor.lastrowid
         
-        if acc.vai_tro == 'student' and acc.id_lop is not None:
-            sql_hs = "INSERT INTO hoc_sinh (ten_hoc_sinh, ngay_sinh, so_dien_thoai, email, id_tai_khoan, id_lop) VALUES (%s, %s, %s, %s, %s, %s)"
-            cursor.execute(sql_hs, (acc.ten_hoc_sinh, acc.ngay_sinh, acc.so_dien_thoai, acc.email, new_acc_id, acc.id_lop))
+        if acc.vai_tro == 'student':
+            sql_hs = "INSERT INTO hoc_sinh (ten_hoc_sinh, ngay_sinh, so_dien_thoai, email, id_tai_khoan) VALUES (%s, %s, %s, %s, %s)"
+            cursor.execute(sql_hs, (acc.ten_hoc_sinh, acc.ngay_sinh, acc.so_dien_thoai, acc.email, new_acc_id))
+            if getattr(acc, 'id_lop', None) is not None:
+                cursor.execute("INSERT INTO chi_tiet_lop_hoc (id_hoc_sinh, id_lop, trang_thai_hoc) VALUES (%s, %s, 'dang_hoc')", (new_acc_id, acc.id_lop))
+
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã tạo tài khoản {acc.vai_tro} mới: '{acc.ten_dang_nhap}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TAI_KHOAN', %s)", (id_admin, chi_tiet_log))
             
         db.commit()
         db.close()
@@ -323,7 +322,7 @@ async def add_account(acc: AccountModel):
 
 
 @router.post("/update-account/{acc_id}")
-async def update_account(acc_id: int, acc: AccountModel):
+async def update_account(acc_id: int, acc: AccountModel, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor()
@@ -361,7 +360,9 @@ async def update_account(acc_id: int, acc: AccountModel):
                     
             cursor.execute("UPDATE hoc_sinh SET ten_hoc_sinh = %s, ngay_sinh = %s, so_dien_thoai = %s WHERE id_tai_khoan = %s", 
                (acc.ten_hoc_sinh, acc.ngay_sinh, acc.so_dien_thoai, acc_id))
-            
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã cập nhật thông tin tài khoản ID: #{acc_id}"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TAI_KHOAN', %s)", (id_admin, chi_tiet_log))
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã cập nhật tài khoản thành công!"}
@@ -370,12 +371,12 @@ async def update_account(acc_id: int, acc: AccountModel):
     
     
 @router.post("/delete-account/{acc_id}")
-async def delete_account(acc_id: int):
+async def delete_account(acc_id: int, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        cursor.execute("SELECT vai_tro FROM tai_khoan WHERE id = %s", (acc_id,))
+        cursor.execute("SELECT vai_tro, ten_dang_nhap FROM tai_khoan WHERE id = %s", (acc_id,))
         acc = cursor.fetchone()
         if not acc:
             return {"status": "error", "message": "Tài khoản không tồn tại."}
@@ -388,21 +389,28 @@ async def delete_account(acc_id: int):
             
             for c in classes:
                 class_id = c['id']
-                cursor.execute("SELECT id_tai_khoan FROM hoc_sinh WHERE id_lop = %s", (class_id,))
-                student_acc_ids = [s['id_tai_khoan'] for s in cursor.fetchall()]
+                cursor.execute("SELECT id_hoc_sinh FROM chi_tiet_lop_hoc WHERE id_lop = %s", (class_id,))
+                student_acc_ids = [s['id_hoc_sinh'] for s in cursor.fetchall()]
                 
-                cursor.execute("DELETE FROM hoc_sinh WHERE id_lop = %s", (class_id,))
+                cursor.execute("DELETE FROM chi_tiet_lop_hoc WHERE id_lop = %s", (class_id,))
                 
                 if student_acc_ids:
                     format_strings = ','.join(['%s'] * len(student_acc_ids))
+                    cursor.execute(f"DELETE FROM hoc_sinh WHERE id_tai_khoan IN ({format_strings})", tuple(student_acc_ids))
                     cursor.execute(f"DELETE FROM tai_khoan WHERE id IN ({format_strings})", tuple(student_acc_ids))
             
             cursor.execute("DELETE FROM lop_hoc WHERE id_giao_vien = %s", (acc_id,))
 
         elif role == 'student':
             cursor.execute("DELETE FROM hoc_sinh WHERE id_tai_khoan = %s", (acc_id,))
+            cursor.execute("DELETE FROM chi_tiet_lop_hoc WHERE id_hoc_sinh = %s", (acc_id,))
 
         cursor.execute("DELETE FROM tai_khoan WHERE id = %s", (acc_id,))
+        # --- LƯU NHẬT KÝ ---
+        if acc:
+            chi_tiet_log = f"Đã xóa vĩnh viễn tài khoản {role}: '{acc['ten_dang_nhap']}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TAI_KHOAN', %s)", (id_admin, chi_tiet_log))
+
 
         db.commit()
         db.close()
@@ -411,7 +419,7 @@ async def delete_account(acc_id: int):
         return {"status": "error", "message": str(e)}
 
 @router.post("/reset-password/{acc_id}")
-async def reset_password(acc_id: int):
+async def reset_password(acc_id: int, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor()
@@ -421,6 +429,10 @@ async def reset_password(acc_id: int):
         hashed_password = hash_password(default_pass)
         
         cursor.execute("UPDATE tai_khoan SET mat_khau = %s WHERE id = %s", (hashed_password, acc_id))
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã khôi phục mật khẩu mặc định (123456) cho tài khoản ID: #{acc_id}"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TAI_KHOAN', %s)", (id_admin, chi_tiet_log))
+
         
         db.commit()
         db.close()
@@ -433,12 +445,11 @@ async def reset_password(acc_id: int):
 # API THÊM/SỬA/XÓA LỚP HỌC
 # ==========================================
 @router.post("/add-class")
-async def add_class(cls: ClassModel):
+async def add_class(cls: ClassModel, id_admin: int = Query(0)):    
     try:
         db = get_db_connection()
         cursor = db.cursor()
         
-        # Kiểm tra lớp trùng tên của cùng một giáo viên
         cursor.execute("SELECT id FROM lop_hoc WHERE ten_lop = %s AND id_giao_vien = %s", (cls.ten_lop.strip(), cls.id_giao_vien))
         if cursor.fetchone():
             db.close()
@@ -446,6 +457,13 @@ async def add_class(cls: ClassModel):
             
         cursor.execute("INSERT INTO lop_hoc (ten_lop, ma_tham_gia, id_giao_vien) VALUES (%s, %s, %s)", 
                (cls.ten_lop, cls.ma_tham_gia, cls.id_giao_vien))
+
+        # --- LƯU NHẬT KÝ ADMIN ---
+        actor_id = id_admin if id_admin > 0 else cls.id_giao_vien
+        role_type = 'admin' if id_admin > 0 else 'teacher'
+        chi_tiet_log = f"Đã thêm lớp học mới: '{cls.ten_lop}' cho giáo viên ID #{cls.id_giao_vien}"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, %s, 'QUAN_LY_LOP_HOC', %s)", (actor_id, role_type, chi_tiet_log))
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã thêm lớp học thành công!"}
@@ -453,20 +471,18 @@ async def add_class(cls: ClassModel):
         return {"status": "error", "message": str(e)}
 
 @router.post("/update-class/{class_id}")
-async def update_class(class_id: int, cls: ClassModel):
+async def update_class(class_id: int, cls: ClassModel, id_admin: int = Query(0)):    
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True) 
         
-        # kiểm tra trùng trong phạm vi giáo viên
-        cursor.execute("SELECT id_giao_vien FROM lop_hoc WHERE id = %s", (class_id,))
+        cursor.execute("SELECT id_giao_vien, ten_lop FROM lop_hoc WHERE id = %s", (class_id,))
         lop_hien_tai = cursor.fetchone()
         if not lop_hien_tai:
             db.close()
             return {"status": "error", "message": "Lớp học không tồn tại!"}
             
         id_giao_vien = lop_hien_tai['id_giao_vien']
-        # Kiểm tra lớp trùng tên
         cursor.execute("SELECT id FROM lop_hoc WHERE ten_lop = %s AND id_giao_vien = %s AND id != %s", (cls.ten_lop.strip(), id_giao_vien, class_id))
         if cursor.fetchone():
             db.close()
@@ -474,6 +490,13 @@ async def update_class(class_id: int, cls: ClassModel):
             
         cursor.execute("UPDATE lop_hoc SET ten_lop = %s, ma_tham_gia = %s WHERE id = %s", 
                (cls.ten_lop, cls.ma_tham_gia, class_id))
+
+        # --- LƯU NHẬT KÝ ADMIN ---
+        actor_id = id_admin if id_admin > 0 else id_giao_vien
+        role_type = 'admin' if id_admin > 0 else 'teacher'
+        chi_tiet_log = f"Đã sửa thông tin lớp: '{lop_hien_tai['ten_lop']}' thành '{cls.ten_lop}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, %s, 'QUAN_LY_LOP_HOC', %s)", (actor_id, role_type, chi_tiet_log))
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã cập nhật lớp học thành công!"}
@@ -481,22 +504,27 @@ async def update_class(class_id: int, cls: ClassModel):
         return {"status": "error", "message": str(e)}
 
 @router.post("/delete-class/{class_id}")
-async def delete_class(class_id: int):
+async def delete_class(class_id: int, id_admin: int = Query(0)):    
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
 
-        cursor.execute("SELECT id_tai_khoan FROM hoc_sinh WHERE id_lop = %s", (class_id,))
-        student_acc_ids = [s['id_tai_khoan'] for s in cursor.fetchall()]
+        cursor.execute("SELECT id_giao_vien, ten_lop FROM lop_hoc WHERE id = %s", (class_id,))
+        lop_hien_tai = cursor.fetchone()
 
-        cursor.execute("DELETE FROM hoc_sinh WHERE id_lop = %s", (class_id,))
-
+        cursor.execute("SELECT id_hoc_sinh FROM chi_tiet_lop_hoc WHERE id_lop = %s", (class_id,))
+        student_acc_ids = [s['id_hoc_sinh'] for s in cursor.fetchall()]
+        cursor.execute("DELETE FROM chi_tiet_lop_hoc WHERE id_lop = %s", (class_id,))
         if student_acc_ids:
             format_strings = ','.join(['%s'] * len(student_acc_ids))
-            cursor.execute(f"DELETE FROM tai_khoan WHERE id IN ({format_strings})", tuple(student_acc_ids))
-
+        cursor.execute("DELETE FROM chi_tiet_lop_hoc WHERE id_lop = %s", (class_id,))
         cursor.execute("DELETE FROM lop_hoc WHERE id = %s", (class_id,))
-
+        # --- LƯU NHẬT KÝ ADMIN ---
+        if lop_hien_tai:
+            actor_id = id_admin if id_admin > 0 else lop_hien_tai['id_giao_vien']
+            role_type = 'admin' if id_admin > 0 else 'teacher'
+            chi_tiet_log = f"Đã xóa lớp: '{lop_hien_tai['ten_lop']}' và giải tán {len(student_acc_ids)} học sinh"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, %s, 'QUAN_LY_LOP_HOC', %s)", (actor_id, role_type, chi_tiet_log))
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã xóa lớp và giải tán toàn bộ học sinh liên quan!"}
@@ -533,6 +561,10 @@ async def tao_tin_tuc(
         sql = """INSERT INTO tin_tuc (tieu_de, tom_tat, noi_dung, anh_dai_dien, id_admin) 
                  VALUES (%s, %s, %s, %s, %s)"""
         cursor.execute(sql, (tieu_de, tom_tat, noi_dung, db_img_path, id_admin))
+        # --- LƯU NHẬT KÝ ---
+        chi_tiet_log = f"Đã đăng tin tức mới: '{tieu_de}'"
+        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TIN_TUC', %s)", (id_admin, chi_tiet_log))
+
         db.commit()
         
         new_id = cursor.lastrowid
@@ -580,8 +612,11 @@ async def update_news(
 ):
     try:
         db = get_db_connection()
-        cursor = db.cursor()
-        
+        cursor = db.cursor(dictionary=True)
+
+        cursor.execute("SELECT id_admin FROM tin_tuc WHERE id = %s", (news_id,))
+        news_info = cursor.fetchone()
+        id_admin = news_info['id_admin'] if news_info else 0        
         if anh_dai_dien and anh_dai_dien.filename:
             upload_dir = "uploads/tin_tuc"
             os.makedirs(upload_dir, exist_ok=True)
@@ -600,6 +635,11 @@ async def update_news(
         else:
             sql = """UPDATE tin_tuc SET tieu_de = %s, tom_tat = %s, noi_dung = %s WHERE id = %s"""
             cursor.execute(sql, (tieu_de, tom_tat, noi_dung, news_id))
+        # --- LƯU NHẬT KÝ ---
+        if id_admin:
+            chi_tiet_log = f"Đã cập nhật tin tức: '{tieu_de}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TIN_TUC', %s)", (id_admin, chi_tiet_log))
+
             
         db.commit()
         cursor.close()
@@ -612,8 +652,17 @@ async def update_news(
 async def delete_news(news_id: int):
     try:
         db = get_db_connection()
-        cursor = db.cursor()
+        cursor = db.cursor(dictionary=True)
+
+        cursor.execute("SELECT id_admin, tieu_de FROM tin_tuc WHERE id = %s", (news_id,))
+        news_info = cursor.fetchone()
         cursor.execute("DELETE FROM tin_tuc WHERE id = %s", (news_id,))
+
+        # --- LƯU NHẬT KÝ ---
+        if news_info:
+            chi_tiet_log = f"Đã xóa tin tức: '{news_info['tieu_de']}'"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TIN_TUC', %s)", (news_info['id_admin'], chi_tiet_log))
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã xóa bài viết thành công!"}
@@ -655,7 +704,6 @@ async def user_update_profile(acc_id: int, req: UpdateProfileModel):
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        # --- CẬP NHẬT TÀI KHOẢN 
         cursor.execute("SELECT mat_khau FROM tai_khoan WHERE id = %s", (acc_id,))
         user = cursor.fetchone()
         if not user:
@@ -677,7 +725,6 @@ async def user_update_profile(acc_id: int, req: UpdateProfileModel):
             hashed_new = hash_password(req.mat_khau_moi)
             cursor.execute("UPDATE tai_khoan SET mat_khau = %s WHERE id = %s", (hashed_new, acc_id))
             
-        # --- CẬP NHẬT HỌC SINH 
         if req.vai_tro == 'student':
             cursor.execute("SELECT ten_hoc_sinh, ngay_sinh, so_dien_thoai FROM hoc_sinh WHERE id_tai_khoan = %s", (acc_id,))
             hs_old = cursor.fetchone()
@@ -707,6 +754,52 @@ async def user_update_profile(acc_id: int, req: UpdateProfileModel):
         return {"status": "success", "message": "Cập nhật thông tin cá nhân thành công!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+# ==========================================
+# 1. API ADMIN: XEM NHẬT KÝ THAO TÁC CỦA TẤT CẢ ADMIN
+# ==========================================
+@router.get("/get-admin-logs")
+async def get_all_admin_logs():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        sql = """
+            SELECT n.*, t.ten_dang_nhap, t.email 
+            FROM nhat_ky_hoat_dong n
+            LEFT JOIN tai_khoan t ON n.id_tai_khoan = t.id
+            WHERE n.vai_tro = 'admin'
+            ORDER BY n.thoi_gian DESC LIMIT 500
+        """
+        cursor.execute(sql)
+        logs = cursor.fetchall()
+        db.close()
+        return {"status": "success", "data": logs}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ==========================================
+# 2. API ADMIN: XEM NHẬT KÝ HỆ THỐNG (CHỈ GIÁO VIÊN & HỌC SINH)
+# ==========================================
+@router.get("/get-system-logs")
+async def get_system_logs():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        sql = """
+            SELECT n.*, t.ten_dang_nhap, t.email 
+            FROM nhat_ky_hoat_dong n
+            LEFT JOIN tai_khoan t ON n.id_tai_khoan = t.id
+            WHERE n.vai_tro IN ('teacher', 'student')
+            ORDER BY n.thoi_gian DESC LIMIT 500
+        """
+        cursor.execute(sql)
+        logs = cursor.fetchall()
+        db.close()
+        return {"status": "success", "data": logs}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 
 # =========================================================================
 # API ADMIN: BÓC TÁCH PDF/ẢNH BẰNG AI & PYMUPDF (FIX LỖI KEYERROR)

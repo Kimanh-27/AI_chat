@@ -41,7 +41,7 @@ llm = ChatOpenAI(
 # Dùng cho Chatbot
 flash_model = genai.GenerativeModel('gemini-3.5-flash')
 
-pro_model = genai.GenerativeModel('gemini-3.1-pro')
+pro_model = genai.GenerativeModel('3.1-pro-preview')
 
 router = APIRouter()
 

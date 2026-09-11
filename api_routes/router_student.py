@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, HTTPException
 from database import get_db_connection
-from schemas import HistoryData, IIGSubmitData
+from schemas import HistoryData, IIGSubmitData,LogViewRequest
 import json
 import re
 import os
@@ -585,7 +585,6 @@ async def generate_matching(topic_id: int, limit: int = Query(5, le=15)):
         """
 
         model = genai.GenerativeModel('gemini-2.5-flash')
-        # ĐÃ SỬA: Đổi sang gọi AI bất đồng bộ
         response = await model.generate_content_async(prompt)
         
         cleaned_text = response.text.replace("```json", "").replace("```", "").strip()
@@ -595,3 +594,32 @@ async def generate_matching(topic_id: int, limit: int = Query(5, le=15)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/get-all-grammar-docs")
+async def get_all_grammar_docs():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        # Lấy toàn bộ dữ liệu (không cần id_giao_vien vì tài liệu là dùng chung cho toàn hệ thống)
+        cursor.execute("SELECT id, tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, ngay_tao FROM tai_lieu_hoc ORDER BY id DESC")
+        docs = cursor.fetchall()
+        db.close()
+        return {"status": "success", "data": docs}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/log-doc-view")
+async def log_doc_view(req: LogViewRequest):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        cursor.execute(
+            "INSERT INTO lich_su_xem_tai_lieu (id_hoc_sinh, id_tai_lieu) VALUES (%s, %s)", 
+            (req.id_hoc_sinh, req.id_tai_lieu)
+        )
+        db.commit()
+        db.close()
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

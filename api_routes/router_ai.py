@@ -6,6 +6,7 @@ import re
 import asyncio
 import os
 
+from huggingface_hub import InferenceClient
 from fastapi.responses import StreamingResponse
 
 from dotenv import load_dotenv
@@ -14,10 +15,6 @@ from database import get_db_connection
 from schemas import QuestionRequest, ExamRequest, PracticeQuestion, UpdateQuestionModel
 from prompts import TOEIC_CONFIG
 
-# --- THƯ VIỆN AI ---
-import google.generativeai as genai
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_openai import ChatOpenAI
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -25,35 +22,15 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 load_dotenv()
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+HF_TOKEN = os.getenv("HUGGING_FACE_API_KEY")
 
-genai.configure(api_key=GOOGLE_API_KEY)
-
-
-llm = ChatOpenAI(
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-    api_key=GOOGLE_API_KEY, 
-    model_name="gemini-2.5-flash", 
-    temperature=0.5,
-    max_tokens=8192 
-)
-
-# Dùng cho Chatbot
-flash_model = genai.GenerativeModel('gemini-3.5-flash')
-
-pro_model = genai.GenerativeModel('3.1-pro-preview')
+# Khởi tạo InferenceClient từ Hugging Face Pro token an toàn qua biến môi trường
+client = InferenceClient(api_key=HF_TOKEN)
 
 router = APIRouter()
 
 uploaded_docs_cache = {} 
 global_vectorstore = None
-
-#embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
-embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/embedding-001",
-    google_api_key=GOOGLE_API_KEY
-)
 nova_tasks = {}
 
 @router.post("/generate_toeic")
@@ -63,7 +40,6 @@ async def generate_toeic(
     image: UploadFile = File(None)
 ):
     try:
-        
         config = TOEIC_CONFIG.get(part)
         if not config:
             return {"status": "error", "message": "Không tìm thấy cấu hình cho Part này."}
@@ -74,11 +50,11 @@ async def generate_toeic(
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT id, ten_dang FROM danh_muc_dang_bai WHERE part = %s", (part,))
         danh_sach_dang = cursor.fetchall()
-        menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
         conn.close()
+        menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
 
         strict_rule = f"""
-\n[QUY TRÌNH AUTO-TAGGING BẮT BUỘC NGHIÊM NGẶT]
+[QUY TRÌNH AUTO-TAGGING BẮT BUỘC NGHIÊM NGẶT]
 Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
 Để đảm bảo chất lượng, bạn PHẢI làm theo đúng trình tự 3 bước sau:
 1. CHỌN DẠNG BÀI TRƯỚC: Chọn ngẫu nhiên {q_count} ID từ danh sách trên (cố gắng phân bổ đều, không lặp lại 1 ID quá nhiều lần).
@@ -87,20 +63,34 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
 """
         final_prompt = config["system_prompt"].replace("{num_questions}", str(q_count)) + strict_rule
 
+        messages = [{"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."}]
+
         if config["requires_image"]:
             if not image:
                 return {"status": "error", "message": f"{part} yêu cầu phải có ảnh!"}
             
             image_bytes = await image.read()
-            image_parts = [{"mime_type": image.content_type, "data": image_bytes}]
+            encoded_string = base64.b64encode(image_bytes).decode('utf-8')
+            img_data_uri = f"data:{image.content_type};base64,{encoded_string}"
             
-            model = pro_model
-            response = await model.generate_content_async([image_parts[0], final_prompt])
+            messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": final_prompt},
+                    {"type": "image_url", "image_url": {"url": img_data_uri}}
+                ]
+            })
         else:
-            model = pro_model
-            response = await model.generate_content_async(final_prompt)
+            messages.append({"role": "user", "content": final_prompt})
 
-        raw_text = response.text.strip()
+        # Sử dụng mô hình Vision/Text mạnh mẽ của Qwen trên Hugging Face Pro
+        response = client.chat.completions.create(
+            model="Qwen/Qwen2.5-72B-Instruct",
+            messages=messages,
+            max_tokens=8192,
+            temperature=0.5
+        )
+        raw_text = response.choices[0].message.content.strip()
         
         match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
         
@@ -115,7 +105,7 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
 
 
 #=============================================================
-#===                SINH ĐỀ CHO PART 1              ==========
+#===                 SINH ĐỀ CHO PART 1              ==========
 #=============================================================
 @router.post("/generate-part1")
 async def generate_part1_api(files: List[UploadFile] = File(...)):
@@ -126,29 +116,40 @@ async def generate_part1_api(files: List[UploadFile] = File(...)):
         cursor = db.cursor(dictionary=True)
         cursor.execute("SELECT id, ten_dang FROM danh_muc_dang_bai WHERE part = 'part_1'")
         danh_sach_dang = cursor.fetchall()
-        menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
         db.close()
+        menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
 
         strict_rule = f"\nYÊU CẦU AUTO-TAGGING: Dựa vào nội dung bức ảnh, hãy tự phân tích xem nó thuộc dạng nào trong Menu dưới đây, và THÊM trường 'id_dang_bai' (chứa số ID tương ứng) vào JSON.\nMENU DẠNG BÀI HIỆN CÓ: [{menu_dang_bai}]."
         system_prompt = config["system_prompt"] + strict_rule
-        model = genai.GenerativeModel('gemini-2.5-flash')
         
         danh_sach_cau_hoi = [] 
         
-        print(f"Bắt đầu xử lý LẦN LƯỢT {len(files)} ảnh ...")
+        print(f"Bắt đầu xử lý LẦN LƯỢT {len(files)} ảnh qua Hugging Face...")
         
         for index, file in enumerate(files):
             print(f"⏳ Đang xử lý ảnh {index + 1}/{len(files)}: {file.filename}")
             try:
                 image_bytes = await file.read()
-                image_parts = [{"mime_type": file.content_type, "data": image_bytes}]
-                
                 encoded_string = base64.b64encode(image_bytes).decode('utf-8')
                 img_data_uri = f"data:{file.content_type};base64,{encoded_string}"
                 
-                response = await model.generate_content_async([image_parts[0], system_prompt])
+                response = client.chat.completions.create(
+                    model="Qwen/Qwen2.5-VL-72B-Instruct",
+                    messages=[
+                        {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": system_prompt},
+                                {"type": "image_url", "image_url": {"url": img_data_uri}}
+                            ]
+                        }
+                    ],
+                    max_tokens=2048,
+                    temperature=0.5
+                )
                 
-                raw_text = response.text.strip()
+                raw_text = response.choices[0].message.content.strip()
                 
                 bt = "`" * 3
                 if raw_text.startswith(bt + "json"): raw_text = raw_text[7:]
@@ -167,11 +168,10 @@ async def generate_part1_api(files: List[UploadFile] = File(...)):
                 elif isinstance(parsed_data, dict):
                     parsed_data['hinh_anh'] = img_data_uri
                     danh_sach_cau_hoi.append(parsed_data)
-                    
+                
                 print(f"xong ảnh {index + 1}")
                 
                 if index < len(files) - 1:
-                    print(f"nghỉ 2 giây...")
                     await asyncio.sleep(2)
                     
             except json.JSONDecodeError as e:
@@ -188,7 +188,7 @@ async def generate_part1_api(files: List[UploadFile] = File(...)):
 
 
 #=============================================================
-#===      SINH ĐỀ CHO PART KHÔNG CÓ ẢNH VÀ ĐOẠN VĂN     ======
+#===     SINH ĐỀ CHO PART KHÔNG CÓ ẢNH VÀ ĐOẠN VĂN      ======
 #=============================================================
 
 @router.post("/generate-questions")
@@ -198,16 +198,15 @@ async def generate_questions_api(req: QuestionRequest):
         if not config:
             return {"status": "error", "message": "Part này chưa được hỗ trợ."}
 
-        # LẤY MENU DẠNG BÀI TỪ DATABASE ---
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT id, ten_dang FROM danh_muc_dang_bai WHERE part = %s", (req.part,))
         danh_sach_dang = cursor.fetchall()
-        menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
         conn.close()
+        menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
 
         strict_rule = f"""
-\n[QUY TRÌNH AUTO-TAGGING BẮT BUỘC NGHIÊM NGẶT]
+[QUY TRÌNH AUTO-TAGGING BẮT BUỘC NGHIÊM NGẶT]
 Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
 Để đảm bảo chất lượng, bạn PHẢI làm theo đúng trình tự 3 bước sau để tạo {req.num_questions} câu:
 1. CHỌN DẠNG BÀI TRƯỚC: Chọn ngẫu nhiên {req.num_questions} ID từ danh sách trên (cố gắng phân bổ đều, không lặp lại 1 ID quá nhiều lần).
@@ -216,12 +215,18 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
 """
         system_prompt = config["system_prompt"] + strict_rule
         
-        model = pro_model
+        print(f"Đang sinh {req.num_questions} câu cho {req.part} qua Hugging Face...")
+        response = client.chat.completions.create(
+            model="Qwen/Qwen2.5-72B-Instruct",
+            messages=[
+                {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
+                {"role": "user", "content": system_prompt}
+            ],
+            max_tokens=8192,
+            temperature=0.5
+        )
         
-        print(f"Đang sinh {req.num_questions} câu cho {req.part} theo chuỗi tư duy mới...")
-        response = await model.generate_content_async(system_prompt)
-        
-        raw_text = response.text.strip()
+        raw_text = response.choices[0].message.content.strip()
         if raw_text.startswith("```json"):
             raw_text = raw_text[7:-3].strip()
         elif raw_text.startswith("```"):
@@ -243,7 +248,7 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
 
 
 #=============================================================
-#===      SINH ĐỀ CHO PART CÓ ĐOẠN VĂN BẢN    ==========
+#===     SINH ĐỀ CHO PART CÓ ĐOẠN VĂN BẢN           ==========
 #=============================================================
 @router.post("/generate-passage-questions")
 async def generate_passage_questions_api(req: QuestionRequest):
@@ -254,12 +259,18 @@ async def generate_passage_questions_api(req: QuestionRequest):
 
         system_prompt = config["system_prompt"] + f"\n\nYêu cầu bổ sung: Hãy sinh ra CHÍNH XÁC {req.num_questions} đoạn văn. Mỗi đoạn văn đi kèm 3 câu hỏi."
         
-        model = pro_model
-        
         print(f"Đang sinh Đoạn văn + {req.num_questions} câu cho {req.part}...")
-        response = model.generate_content(system_prompt)
+        response = client.chat.completions.create(
+            model="Qwen/Qwen2.5-72B-Instruct",
+            messages=[
+                {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
+                {"role": "user", "content": system_prompt}
+            ],
+            max_tokens=8192,
+            temperature=0.5
+        )
         
-        raw_text = response.text.strip()
+        raw_text = response.choices[0].message.content.strip()
         if raw_text.startswith("```json"):
             raw_text = raw_text[7:-3].strip()
         elif raw_text.startswith("```"):
@@ -275,7 +286,7 @@ async def generate_passage_questions_api(req: QuestionRequest):
 
 
 # =============================================================
-# ===   HÀM KIỂM ĐỊNH TỰ ĐỘNG (LỚP 1 - VALIDATOR)           ===
+# ===   HÀM KIỂM ĐỊNH TỰ ĐỘNG (LỚP 1 - VALIDATOR)            ===
 # =============================================================
 def validate_generated_batch(parsed_data, expected_count, is_passage=False):
     if not parsed_data or not isinstance(parsed_data, list):
@@ -300,10 +311,9 @@ def validate_generated_batch(parsed_data, expected_count, is_passage=False):
     return True
 
 # =============================================================
-# ===   ORCHESTRATOR: SINH ĐỀ FULL 200 CÂU (CHẠY NGẦM)      ===
+# ===   ORCHESTRATOR: SINH ĐỀ FULL 200 CÂU (CHẠY NGẦM)       ===
 # =============================================================
 
-# Hàm xử lý chạy ngầm
 async def build_200_questions_task(task_id: str, test_name: str, image_data_list: list):
     try:
         full_test_data = {}
@@ -316,9 +326,8 @@ async def build_200_questions_task(task_id: str, test_name: str, image_data_list
             cursor_p1 = db_p1.cursor(dictionary=True)
             cursor_p1.execute("SELECT id, ten_dang FROM danh_muc_dang_bai WHERE part = 'part_1'")
             danh_sach_dang = cursor_p1.fetchall()
-            menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
             db_p1.close()
-            
+            menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
             strict_rule = f"\nYÊU CẦU AUTO-TAGGING: Dựa vào nội dung bức ảnh, hãy tự phân tích xem nó thuộc dạng nào trong Menu dưới đây, và THÊM trường 'id_dang_bai' (chứa số ID tương ứng) vào JSON.\nMENU DẠNG BÀI HIỆN CÓ: [{menu_dang_bai}]."
             system_prompt_p1 = config_p1["system_prompt"] + strict_rule
         except Exception:
@@ -328,13 +337,25 @@ async def build_200_questions_task(task_id: str, test_name: str, image_data_list
             nova_tasks[task_id]["message"] = f"Đang phân tích ảnh {idx + 1}/6 cho Part 1..."
             try:
                 image_bytes = img_info['data']
-                image_parts = [{"mime_type": img_info['mime_type'], "data": image_bytes}]
-                
                 encoded_string = base64.b64encode(image_bytes).decode('utf-8')
                 img_data_uri = f"data:{img_info['mime_type']};base64,{encoded_string}"
                 
-                response = await pro_model.generate_content_async([image_parts[0], system_prompt_p1])
-                raw_text = response.text.strip()
+                response = client.chat.completions.create(
+                    model="Qwen/Qwen2.5-VL-72B-Instruct",
+                    messages=[
+                        {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": system_prompt_p1},
+                                {"type": "image_url", "image_url": {"url": img_data_uri}}
+                            ]
+                        }
+                    ],
+                    max_tokens=2048,
+                    temperature=0.5
+                )
+                raw_text = response.choices[0].message.content.strip()
                 
                 bt = "`" * 3
                 if raw_text.startswith(bt + "json"): raw_text = raw_text[7:]
@@ -396,8 +417,16 @@ async def build_200_questions_task(task_id: str, test_name: str, image_data_list
                 
                 for attempt in range(max_retries):
                     try:
-                        response = await pro_model.generate_content_async(system_prompt)
-                        raw_text = response.text.strip()
+                        response = client.chat.completions.create(
+                            model="Qwen/Qwen2.5-72B-Instruct",
+                            messages=[
+                                {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
+                                {"role": "user", "content": system_prompt}
+                            ],
+                            max_tokens=8192,
+                            temperature=0.5
+                        )
+                        raw_text = response.choices[0].message.content.strip()
                         
                         match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
                         if match:
@@ -489,7 +518,7 @@ async def get_task_status_api(task_id: str):
     return {"status": "success", "data": task}
 
 #=============================================================
-#===      LƯU BỘ CÂU HỎI AI SINH     ==========
+#===       LƯU BỘ CÂU HỎI AI SINH          ==========
 #=============================================================
 @router.post("/save-practice-questions")
 async def save_practice_questions(questions: List[PracticeQuestion]):
@@ -506,7 +535,6 @@ async def save_practice_questions(questions: List[PracticeQuestion]):
                    q.dap_an_a, q.dap_an_b, q.dap_an_c, q.dap_an_d, q.dap_an_dung, q.giai_thich)
             cursor.execute(sql, val)
 
-        # --- LƯU NHẬT KÝ ---
         if questions:
             id_gv = questions[0].id_giao_vien
             chi_tiet_log = f"Đã duyệt và lưu thành công {len(questions)} câu hỏi ôn luyện mới"
@@ -516,14 +544,13 @@ async def save_practice_questions(questions: List[PracticeQuestion]):
         cursor.close()
         db.close()
         
-        return {"status": "success", "message": f"Đã lưu thành công {len(questions)} câu vào Ngân hàng Ôn luyện!"}
+        return {"status": "success", "message": f"Đã lưu thành công {len(questions)} câu vào Ngân hàng Ôน luyện!"}
         
     except Exception as e:
         print(f"Lỗi lưu câu hỏi: {e}")
         return {"status": "error", "message": "Lỗi Database: " + str(e)}
 
 
-# API XÓA CÂU HỎI
 @router.post("/delete-question/{q_id}")
 async def delete_question(q_id: int):
     try:
@@ -535,7 +562,6 @@ async def delete_question(q_id: int):
         
         cursor.execute("DELETE FROM ngan_hang_cau_hoi WHERE id = %s", (q_id,))
         
-        # --- LƯU NHẬT KÝ ---
         if gv_info:
             chi_tiet_log = f"Đã xóa câu hỏi ID: #{q_id} khỏi Ngân hàng"
             cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_CAU_HOI', %s)", (gv_info[0], chi_tiet_log))
@@ -565,7 +591,6 @@ async def update_question(q_id: int, q: UpdateQuestionModel):
         
         cursor.execute(sql, val)
         
-        # --- LƯU NHẬT KÝ ---
         if gv_info:
             chi_tiet_log = f"Đã cập nhật nội dung câu hỏi ID: #{q_id}"
             cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_CAU_HOI', %s)", (gv_info[0], chi_tiet_log))
@@ -612,31 +637,19 @@ TUYỆT ĐỐI KHÔNG lặp lại lời chào (như "Chào bạn!", "Mình là N
 {diem_so_context}
 """
 
-        if global_vectorstore is None:
-            history_text = "\n".join([f"{'Học sinh' if m.role == 'user' else 'Nova'}: {m.content}" for m in request.history[:-1]])
-            full_prompt = f"{base_prompt}\n\n[LỊCH SỬ TRÒ CHUYỆN]\n{history_text}\n\nHọc sinh: {request.yeu_cau}\nNova:"
-        
-            model = genai.GenerativeModel('gemini-2.5-flash')
-            response = model.generate_content(full_prompt)
-            result = response.text
+        messages = [{"role": "system", "content": base_prompt}]
+        for m in request.history[:-1]:
+            role = "user" if m.role == 'user' else "assistant"
+            messages.append({"role": role, "content": m.content})
+        messages.append({"role": "user", "content": request.yeu_cau})
 
-        else:
-            rag_prompt = base_prompt + """\n[TÀI LIỆU BÀI GIẢNG TỪ GIÁO VIÊN]:\n{context}\n\nHãy ƯU TIÊN SỐ 1 việc sử dụng kiến thức trong Tài liệu trên để trả lời học sinh. Nếu tài liệu không chứa thông tin liên quan, hãy sử dụng kiến thức nền của bạn."""
-            
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", rag_prompt),
-                MessagesPlaceholder(variable_name="chat_history"),
-                ("human", "{question}")
-            ])
-            chain = (
-                {
-                    "context": global_vectorstore.as_retriever(search_kwargs={"k": 4}), 
-                    "chat_history": lambda x: chat_memory,
-                    "question": RunnablePassthrough()
-                }
-                | prompt | llm | StrOutputParser()
-            )
-            result = chain.invoke(request.yeu_cau)
+        response = client.chat.completions.create(
+            model="Qwen/Qwen2.5-72B-Instruct",
+            messages=messages,
+            max_tokens=4096,
+            temperature=0.7
+        )
+        result = response.choices[0].message.content
 
         current_session_id = request.session_id
         try:
@@ -651,7 +664,7 @@ TUYỆT ĐỐI KHÔNG lặp lại lời chào (như "Chào bạn!", "Mình là N
             db.commit()
             cursor.close()
             db.close()
-        except Exception as e:
+        except Exception:
             pass
 
         nova_tasks[task_id] = {"status": "done", "ket_qua": result, "session_id": current_session_id}
@@ -659,7 +672,6 @@ TUYỆT ĐỐI KHÔNG lặp lại lời chào (như "Chào bạn!", "Mình là N
     except Exception as e:
         import traceback
         traceback.print_exc() 
-        print(f"LỖI AI CHÍNH XÁC LÀ: {e}")
         nova_tasks[task_id] = {"status": "error", "message": "Mình đang bị nghẽn mạng một chút, bạn đợi mình vài giây rồi hỏi lại nhé!"}
 
 
@@ -680,18 +692,13 @@ async def chat_with_nova(request: ExamRequest, background_tasks: BackgroundTasks
     return {"status": "processing", "task_id": task_id}
 
 
-# ==========================================
-# API 7: HỎI THĂM KẾT QUẢ 
-# ==========================================
 @router.get("/check-task/{task_id}")
 async def check_task(task_id: str):
     if task_id in nova_tasks:
         return nova_tasks[task_id]
     return {"status": "not_found"}
 
-# ==========================================
-# LÀM MỚI CUỘC TRÒ CHUYỆN
-# ==========================================
+
 @router.post("/reset")
 async def reset_nova():
     global global_vectorstore, uploaded_docs_cache
@@ -726,18 +733,31 @@ async def generate_full_test_stream_api(
             yield "\n[========== ĐANG SINH PART 1 ==========]\n"
             full_test_data["part_1"] = []
             config_p1 = TOEIC_CONFIG.get("part_1")
-            system_prompt_p1 = config_p1["system_prompt"] # Tạm bỏ auto-tagging db ở bản stream này cho nhẹ
+            system_prompt_p1 = config_p1["system_prompt"]
             
             for idx, img_info in enumerate(image_data_list):
                 yield f" -> Đang xử lý ảnh {idx + 1}/6... "
                 try:
                     image_bytes = img_info['data']
-                    image_parts = [{"mime_type": img_info['mime_type'], "data": image_bytes}]
                     encoded_string = base64.b64encode(image_bytes).decode('utf-8')
                     img_data_uri = f"data:{img_info['mime_type']};base64,{encoded_string}"
                     
-                    response = await pro_model.generate_content_async([image_parts[0], system_prompt_p1])
-                    raw_text = response.text.strip()
+                    response = client.chat.completions.create(
+                        model="Qwen/Qwen2.5-VL-72B-Instruct",
+                        messages=[
+                            {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": system_prompt_p1},
+                                    {"type": "image_url", "image_url": {"url": img_data_uri}}
+                                ]
+                            }
+                        ],
+                        max_tokens=2048,
+                        temperature=0.5
+                    )
+                    raw_text = response.choices[0].message.content.strip()
                     match = re.search(r'(\{.*\}|\[.*\])', raw_text, re.DOTALL)
                     clean_json = match.group(1) if match else raw_text
                     parsed_data = json.loads(clean_json)
@@ -781,8 +801,16 @@ async def generate_full_test_stream_api(
                     batch_success = False
                     for attempt in range(3):
                         try:
-                            response = await pro_model.generate_content_async(system_prompt)
-                            raw_text = response.text.strip()
+                            response = client.chat.completions.create(
+                                model="Qwen/Qwen2.5-72B-Instruct",
+                                messages=[
+                                    {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
+                                    {"role": "user", "content": system_prompt}
+                                ],
+                                max_tokens=8192,
+                                temperature=0.5
+                            )
+                            raw_text = response.choices[0].message.content.strip()
                             match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
                             if match:
                                 parsed_data = json.loads(match.group(1))
@@ -822,5 +850,4 @@ async def generate_full_test_stream_api(
         except Exception as e:
             yield f"\n❌ [LỖI HỆ THỐNG NGHIÊM TRỌNG] {str(e)}\n"
 
-    # Trả về StreamingResponse thay vì JSON thông thường
     return StreamingResponse(event_generator(), media_type="text/plain")

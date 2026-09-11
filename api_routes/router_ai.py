@@ -706,6 +706,8 @@ async def generate_full_test_stream_api(
     images: List[UploadFile] = File(...)
 ):
     async def event_generator():
+        yield " " * 1024 + "\n"
+        
         yield f"[*] Đã nhận lệnh tạo đề: {test_name}\n"
         try:
             if len(images) != 6:

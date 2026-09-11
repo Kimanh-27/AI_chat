@@ -6,6 +6,8 @@ import re
 import asyncio
 import os
 
+from fastapi.responses import StreamingResponse
+
 from dotenv import load_dotenv
 from typing import List
 from database import get_db_connection
@@ -696,3 +698,127 @@ async def reset_nova():
     uploaded_docs_cache.clear() 
     global_vectorstore = None   
     return {"status": "success"}
+
+
+@router.post("/generate-full-test-stream")
+async def generate_full_test_stream_api(
+    test_name: str = Form(...),
+    images: List[UploadFile] = File(...)
+):
+    async def event_generator():
+        yield f"[*] Đã nhận lệnh tạo đề: {test_name}\n"
+        try:
+            if len(images) != 6:
+                yield "❌ LỖI: Phải có đúng 6 ảnh cho Part 1!\n"
+                return
+                
+            yield "[*] Đang đọc dữ liệu 6 bức ảnh...\n"
+            image_data_list = []
+            for img in images:
+                bytes_data = await img.read()
+                image_data_list.append({"mime_type": img.content_type, "data": bytes_data})
+            
+            full_test_data = {}
+            
+            # --- XỬ LÝ PART 1 ---
+            yield "\n[========== ĐANG SINH PART 1 ==========]\n"
+            full_test_data["part_1"] = []
+            config_p1 = TOEIC_CONFIG.get("part_1")
+            system_prompt_p1 = config_p1["system_prompt"] # Tạm bỏ auto-tagging db ở bản stream này cho nhẹ
+            
+            for idx, img_info in enumerate(image_data_list):
+                yield f" -> Đang xử lý ảnh {idx + 1}/6... "
+                try:
+                    image_bytes = img_info['data']
+                    image_parts = [{"mime_type": img_info['mime_type'], "data": image_bytes}]
+                    encoded_string = base64.b64encode(image_bytes).decode('utf-8')
+                    img_data_uri = f"data:{img_info['mime_type']};base64,{encoded_string}"
+                    
+                    response = await pro_model.generate_content_async([image_parts[0], system_prompt_p1])
+                    raw_text = response.text.strip()
+                    match = re.search(r'(\{.*\}|\[.*\])', raw_text, re.DOTALL)
+                    clean_json = match.group(1) if match else raw_text
+                    parsed_data = json.loads(clean_json)
+                    
+                    if isinstance(parsed_data, list) and len(parsed_data) > 0:
+                        parsed_data[0]['hinh_anh'] = img_data_uri
+                        full_test_data["part_1"].extend(parsed_data)
+                    yield "[OK]\n"
+                except Exception as e:
+                    yield f"[LỖI: {str(e)}]\n"
+                await asyncio.sleep(2)
+                
+            # --- XỬ LÝ PART 2 ĐẾN PART 7 ---
+            toeic_structure = [
+                {"part": "part_2", "total": 25, "batch_size": 5, "is_passage": False, "desc": "Part 2"},
+                {"part": "part_3", "total": 13, "batch_size": 1, "is_passage": True, "desc": "Part 3"},
+                {"part": "part_4", "total": 10, "batch_size": 1, "is_passage": True, "desc": "Part 4"},
+                {"part": "part_5", "total": 30, "batch_size": 5, "is_passage": False, "desc": "Part 5"},
+                {"part": "part_6", "total": 4,  "batch_size": 1, "is_passage": True, "desc": "Part 6"},
+                {"part": "part_7", "total": 15, "batch_size": 1, "is_passage": True, "desc": "Part 7"}
+            ]
+
+            for step in toeic_structure:
+                part_key = step["part"]
+                yield f"\n[========== ĐANG SINH {step['desc'].upper()} ==========]\n"
+                full_test_data[part_key] = []
+                
+                total_needed = step["total"]
+                batch_size = step["batch_size"]
+                num_batches = (total_needed + batch_size - 1) // batch_size 
+                config = TOEIC_CONFIG.get(part_key)
+                
+                for b in range(num_batches):
+                    current_batch_size = batch_size
+                    if b == num_batches - 1 and total_needed % batch_size != 0:
+                        current_batch_size = total_needed % batch_size
+                        
+                    yield f" -> Đang chạy mẻ {b+1}/{num_batches} (sinh {current_batch_size} câu)... "
+                    system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size))
+                    
+                    batch_success = False
+                    for attempt in range(3):
+                        try:
+                            response = await pro_model.generate_content_async(system_prompt)
+                            raw_text = response.text.strip()
+                            match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
+                            if match:
+                                parsed_data = json.loads(match.group(1))
+                                if validate_generated_batch(parsed_data, current_batch_size, step["is_passage"]):
+                                    full_test_data[part_key].extend(parsed_data)
+                                    batch_success = True
+                                    break
+                        except Exception:
+                            pass
+                        await asyncio.sleep(2)
+                    
+                    if batch_success:
+                        yield "[OK]\n"
+                    else:
+                        yield "[THẤT BẠI - Đã bỏ qua mẻ này]\n"
+                    await asyncio.sleep(3)
+
+            # --- LƯU DATABASE ---
+            yield "\n[*] Đang tiến hành lưu toàn bộ đề vào Database...\n"
+            try:
+                db = get_db_connection()
+                cursor = db.cursor()
+                dap_an_json_string = json.dumps(full_test_data, ensure_ascii=False)
+                import datetime
+                nam_phat_hanh = datetime.date.today().year
+                
+                sql = "INSERT INTO de_thi_iig (ten_de, nguon_goc, nam_phat_hanh, dap_an_json) VALUES (%s, %s, %s, %s)"
+                val = (test_name, 'ai_generated', nam_phat_hanh, dap_an_json_string)
+                cursor.execute(sql, val)
+                id_de_thi = cursor.lastrowid
+                db.commit() 
+                db.close()
+                yield f"✅ [THÀNH CÔNG] Đã lưu xong đề thi! (ID mới: #{id_de_thi})\n\n[=== TIẾN TRÌNH KẾT THÚC HOÀN TOÀN ===]"
+            except Exception as db_err:
+                yield f"❌ [LỖI DATABASE] {str(db_err)}\n"
+                
+        except Exception as e:
+            yield f"\n❌ [LỖI HỆ THỐNG NGHIÊM TRỌNG] {str(e)}\n"
+
+    # Trả về StreamingResponse thay vì JSON thông thường
+    return StreamingResponse(event_generator(), media_type="text/plain")

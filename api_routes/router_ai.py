@@ -746,13 +746,12 @@ async def generate_full_test_stream_api(
                 system_prompt_p1 = config_p1["system_prompt"]
 
             for idx, img_info in enumerate(image_data_list):
-                yield f"-> Đang xử lý ảnh {idx + 1}/6"
+                yield f"-> Đang xử lý ảnh {idx + 1}/6 "
                 try:
                     image_bytes = img_info['data']
                     encoded_string = base64.b64encode(image_bytes).decode('utf-8')
                     img_data_uri = f"data:{img_info['mime_type']};base64,{encoded_string}"
                     
-                    # Dùng ĐÚNG model chuẩn Qwen Vision, THÊM stream=True
                     response = client.chat.completions.create(
                         model="Qwen/Qwen2.5-VL-72B-Instruct",
                         messages=[
@@ -771,10 +770,14 @@ async def generate_full_test_stream_api(
                     )
                     
                     raw_text = ""
+                    chunk_count = 0
                     for chunk in response:
-                        if chunk.choices[0].delta.content:
+                        # FIX LỖI VÀ GIẢM SPAM DẤU CHẤM
+                        if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta.content:
                             raw_text += chunk.choices[0].delta.content
-                            yield "." # Trả về dấu chấm để giữ kết nối JS luôn sáng
+                            chunk_count += 1
+                            if chunk_count % 20 == 0:
+                                yield "." 
                             
                     # Bóc tách JSON
                     match = re.search(r'(\{.*\}|\[.*\])', raw_text, re.DOTALL)
@@ -819,7 +822,7 @@ async def generate_full_test_stream_api(
                     if b == num_batches - 1 and total_needed % batch_size != 0:
                         current_batch_size = total_needed % batch_size
                     
-                    yield f"-> Đang chạy mẻ {b+1}/{num_batches} (sinh {current_batch_size} câu)"
+                    yield f"-> Đang chạy mẻ {b+1}/{num_batches} (sinh {current_batch_size} câu) "
                     config = TOEIC_CONFIG.get(part_key)
                     system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size))
                     
@@ -828,7 +831,6 @@ async def generate_full_test_stream_api(
                     
                     for attempt in range(max_retries):
                         try:
-                            # Dùng Model xử lý chữ mạnh nhất, THÊM stream=True
                             response = client.chat.completions.create(
                                 model="Qwen/Qwen2.5-72B-Instruct",
                                 messages=[
@@ -837,15 +839,19 @@ async def generate_full_test_stream_api(
                                 ],
                                 max_tokens=8192,
                                 temperature=0.2,
-                                stream=True # Chống 504 Timeout
+                                stream=True 
                             )
                             
                             raw_text = ""
+                            chunk_count = 0
                             for chunk in response:
-                                if chunk.choices[0].delta.content:
+                                # FIX LỖI INDEX OUT OF RANGE VÀ GIẢM SPAM DẤU CHẤM
+                                if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta.content:
                                     raw_text += chunk.choices[0].delta.content
-                                    yield "."
-                                    
+                                    chunk_count += 1
+                                    if chunk_count % 30 == 0:
+                                        yield "."
+                                        
                             match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
                             if match:
                                 parsed_data = json.loads(match.group(1))

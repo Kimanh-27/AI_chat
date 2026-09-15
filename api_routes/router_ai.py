@@ -782,7 +782,7 @@ async def generate_full_test_stream_api(
                     # Bóc tách JSON
                     match = re.search(r'(\{.*\}|\[.*\])', raw_text, re.DOTALL)
                     clean_json = match.group(1) if match else raw_text
-                    parsed_data = json.loads(clean_json)
+                    parsed_data = json.loads(clean_json, strict=False)
                     
                     if isinstance(parsed_data, list) and len(parsed_data) > 0:
                         parsed_data[0]['hinh_anh'] = img_data_uri
@@ -854,7 +854,7 @@ async def generate_full_test_stream_api(
                                         
                             match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
                             if match:
-                                parsed_data = json.loads(match.group(1))
+                                parsed_data = json.loads(match.group(1), strict=False)
                                 if validate_generated_batch(parsed_data, current_batch_size, is_passage):
                                     full_test_data[part_key].extend(parsed_data)
                                     batch_success = True

@@ -23,8 +23,6 @@ from langchain_core.messages import HumanMessage, AIMessage
 load_dotenv()
 
 HF_TOKEN = os.getenv("HUGGING_FACE_API_KEY")
-
-# Khởi tạo InferenceClient từ Hugging Face Pro token an toàn qua biến môi trường
 client = InferenceClient(api_key=HF_TOKEN)
 
 router = APIRouter()
@@ -82,8 +80,7 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
             })
         else:
             messages.append({"role": "user", "content": final_prompt})
-
-        # Sử dụng mô hình Vision/Text mạnh mẽ của Qwen trên Hugging Face Pro
+        #dùng model
         response = client.chat.completions.create(
             model="Qwen/Qwen2.5-72B-Instruct",
             messages=messages,

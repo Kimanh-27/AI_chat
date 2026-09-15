@@ -70,13 +70,42 @@ async def get_iig_tests():
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        cursor.execute("SELECT id, ten_de, nam_phat_hanh, ngay_tao FROM de_thi_iig ORDER BY ngay_tao DESC")
+        # Chỉ lấy những đề có nguồn gốc là iig_standard
+        cursor.execute("""
+            SELECT id, ten_de, nam_phat_hanh, ngay_tao, file_pdf, file_audio 
+            FROM de_thi_iig 
+            WHERE nguon_goc = 'iig_standard' OR nguon_goc IS NULL 
+            ORDER BY ngay_tao DESC
+        """)
+        tests = cursor.fetchall()
+        db.close()
+        return {"status": "success", "data": tests}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ==========================================
+# API ADMIN: LẤY DANH SÁCH ĐỀ DO AI SINH RA
+# ==========================================
+@router.get("/get-ai-generated-tests")
+async def get_ai_generated_tests():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        # Chỉ lấy riêng các đề do AI tự động tạo
+        cursor.execute("""
+            SELECT id, ten_de, nam_phat_hanh, ngay_tao, nguon_goc 
+            FROM de_thi_iig 
+            WHERE nguon_goc = 'ai_generated' 
+            ORDER BY ngay_tao DESC
+        """)
         tests = cursor.fetchall()
         db.close()
         return {"status": "success", "data": tests}
     except Exception as e:
         return {"status": "error", "message": str(e)}
     
+
 # ==========================================
 # API ADMIN: LẤY CHI TIẾT 1 ĐỀ IIG ĐỂ XEM TRƯỚC
 # ==========================================

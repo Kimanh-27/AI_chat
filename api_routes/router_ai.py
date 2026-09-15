@@ -82,7 +82,7 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
             messages.append({"role": "user", "content": final_prompt})
         #dùng model
         response = client.chat.completions.create(
-            model="Qwen/Qwen3-30B-A3B-Instruct-2507",
+            model="Qwen/Qwen3-32B",
             messages=messages,
             max_tokens=8192,
             temperature=0.5
@@ -214,7 +214,7 @@ Hệ thống hiện có các dạng bài sau: [{menu_dang_bai}].
         
         print(f"Đang sinh {req.num_questions} câu cho {req.part} qua Hugging Face...")
         response = client.chat.completions.create(
-            model="Qwen/Qwen3-30B-A3B-Instruct-2507",
+            model="Qwen/Qwen3-32B",
             messages=[
                 {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
                 {"role": "user", "content": system_prompt}
@@ -258,7 +258,7 @@ async def generate_passage_questions_api(req: QuestionRequest):
         
         print(f"Đang sinh Đoạn văn + {req.num_questions} câu cho {req.part}...")
         response = client.chat.completions.create(
-            model="Qwen/Qwen3-30B-A3B-Instruct-2507",
+            model="Qwen/Qwen3-32B",
             messages=[
                 {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
                 {"role": "user", "content": system_prompt}
@@ -415,7 +415,7 @@ async def build_200_questions_task(task_id: str, test_name: str, image_data_list
                 for attempt in range(max_retries):
                     try:
                         response = client.chat.completions.create(
-                            model="Qwen/Qwen3-30B-A3B-Instruct-2507",
+                            model="Qwen/Qwen3-32B",
                             messages=[
                                 {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
                                 {"role": "user", "content": system_prompt}
@@ -641,7 +641,7 @@ TUYỆT ĐỐI KHÔNG lặp lại lời chào (như "Chào bạn!", "Mình là N
         messages.append({"role": "user", "content": request.yeu_cau})
 
         response = client.chat.completions.create(
-            model="Qwen/Qwen3-30B-A3B-Instruct-2507",
+            model="Qwen/Qwen3-32B",
             messages=messages,
             max_tokens=4096,
             temperature=0.7
@@ -799,7 +799,7 @@ async def generate_full_test_stream_api(
                     for attempt in range(3):
                         try:
                             response = client.chat.completions.create(
-                                model="Qwen/Qwen3-30B-A3B-Instruct-2507",
+                                model="Qwen/Qwen3-32B",
                                 messages=[
                                     {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
                                     {"role": "user", "content": system_prompt}

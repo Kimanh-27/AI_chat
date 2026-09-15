@@ -154,24 +154,23 @@ async def update_iig_answers(test_id: int, req: UpdateAnswersModel, id_admin: in
 # API XÓA ĐỀ THI IIG
 # ==========================================
 @router.post("/delete-iig-test/{test_id}")
-async def delete_iig_test(test_id: int, id_admin: int = Query(0)):
+async def delete_iig_test(test_id: int, admin_id: int = 0): # Nhận thêm admin_id từ URL
     try:
         db = get_db_connection()
         cursor = db.cursor()
         
-        cursor.execute("SELECT ten_de FROM de_thi_iig WHERE id = %s", (test_id,))
-        de_thi = cursor.fetchone()
-        
         cursor.execute("DELETE FROM de_thi_iig WHERE id = %s", (test_id,))
         
-        # --- LƯU NHẬT KÝ ---
-        if de_thi:
-            chi_tiet_log = f"Đã xóa vĩnh viễn đề thi IIG: '{de_thi[0]}'"
-            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_DE_THI', %s)", (id_admin, chi_tiet_log))
+        if admin_id > 0:
+            chi_tiet_log = f"Đã xóa đề thi IIG (Hoặc đề AI) ID: #{test_id}"
+            cursor.execute("""
+                INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) 
+                VALUES (%s, 'admin', 'XOA_DE_THI', %s)
+            """, (admin_id, chi_tiet_log))
 
         db.commit()
         db.close()
-        return {"status": "success", "message": "Đã xóa đề thi thành công!"}
+        return {"status": "success", "message": "Đã xóa thành công!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

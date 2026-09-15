@@ -152,3 +152,8 @@ class TaiLieuHocModel(BaseModel):
 class LogViewRequest(BaseModel):
     id_hoc_sinh: int
     id_tai_lieu: int
+
+
+class SaveAITestRequest(BaseModel):
+    test_name: str
+    dap_an_json: str

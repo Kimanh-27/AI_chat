@@ -131,7 +131,7 @@ async def generate_part1_api(files: List[UploadFile] = File(...)):
                 img_data_uri = f"data:{file.content_type};base64,{encoded_string}"
                 
                 response = client.chat.completions.create(
-                    model="EasyDeL/Qwen3.5-4B",
+                    model="Qwen/Qwen3.6-27B",
                     messages=[
                         {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
                         {
@@ -338,7 +338,7 @@ async def build_200_questions_task(task_id: str, test_name: str, image_data_list
                 img_data_uri = f"data:{img_info['mime_type']};base64,{encoded_string}"
                 
                 response = client.chat.completions.create(
-                    model="EasyDeL/Qwen3.5-4B",
+                    model="Qwen/Qwen3.6-27B",
                     messages=[
                         {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
                         {
@@ -740,7 +740,7 @@ async def generate_full_test_stream_api(
                     img_data_uri = f"data:{img_info['mime_type']};base64,{encoded_string}"
                     
                     response = client.chat.completions.create(
-                        model="EasyDeL/Qwen3.5-4B",
+                        model="Qwen/Qwen3.6-27B",
                         messages=[
                             {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
                             {

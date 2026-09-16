@@ -617,19 +617,18 @@ async def generate_listening_stream_api(
 
 
 # =============================================================
-# ===   API SINH ĐỀ READING STREAMING (PART 5 -> 7)          ===
+# ===   API SINH ĐỀ READING STREAMING (PART 5 & 6)           ===
 # =============================================================
-@router.post("/generate-reading-stream")
-async def generate_reading_stream_api(test_name: str = Form(...)):
-    async def generate_reading():
+@router.post("/generate-reading-56-stream")
+async def generate_reading_56_stream_api(test_name: str = Form(...)):
+    async def generate_reading_56():
         try:
             full_test_data = {}
-            yield f"Đang khởi tạo tiến trình READING: {test_name}\n"
+            yield f"Đang khởi tạo tiến trình Part 5-6: {test_name}\n"
             
             reading_structure = [
                 {"part": "part_5", "total": 30, "batch_size": 5, "is_passage": False, "desc": "Part 5"},
-                {"part": "part_6", "total": 4,  "batch_size": 1, "is_passage": True, "desc": "Part 6"},
-                {"part": "part_7", "total": 15, "batch_size": 1, "is_passage": True, "desc": "Part 7"}
+                {"part": "part_6", "total": 4,  "batch_size": 1, "is_passage": True, "desc": "Part 6"}
             ]
             
             for step in reading_structure:
@@ -654,9 +653,9 @@ async def generate_reading_stream_api(test_name: str = Form(...)):
                     for attempt in range(3):
                         try:
                             response = client.chat.completions.create(
-                                model="Qwen/Qwen3-32B",
+                                model="Qwen/Qwen2.5-72B-Instruct",
                                 messages=[
-                                    {"role": "system", "content": "You are a professional TOEIC test generator."},
+                                    {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
                                     {"role": "user", "content": system_prompt}
                                 ],
                                 max_tokens=8192, temperature=0.2, stream=True 
@@ -684,13 +683,84 @@ async def generate_reading_stream_api(test_name: str = Form(...)):
                         
                     if not batch_success: yield " [THẤT BẠI - Bỏ qua mẻ này]\n"
                     
-            yield "\n[HOÀN TẤT] Quá trình sinh Reading hoàn tất!\n\n---START_JSON---\n"
+            yield "\n[HOÀN TẤT] Quá trình sinh Part 5-6 hoàn tất!\n\n---START_JSON---\n"
             yield json.dumps(full_test_data, ensure_ascii=False)
             yield "\n---END_JSON---\n"
             
         except Exception as e: yield f"\n[LỖI NGHIÊM TRỌNG]: {str(e)}\n"
 
-    return StreamingResponse(generate_reading(), media_type="text/plain")
+    return StreamingResponse(generate_reading_56(), media_type="text/plain")
+
+
+# =============================================================
+# ===   API SINH ĐỀ READING ĐỌC HIỂU (PART 7 RIÊNG)          ===
+# =============================================================
+@router.post("/generate-reading-7-stream")
+async def generate_reading_7_stream_api(test_name: str = Form(...)):
+    async def generate_reading_7():
+        try:
+            full_test_data = {}
+            yield f"Đang khởi tạo tiến trình Part 7 (Đọc hiểu sâu): {test_name}\n"
+            
+            step = {"part": "part_7", "total": 15, "batch_size": 1, "is_passage": True, "desc": "Part 7"}
+            part_key = step["part"]
+            full_test_data[part_key] = []
+            total_needed = step["total"]
+            batch_size = step["batch_size"]
+            num_batches = (total_needed + batch_size - 1) // batch_size 
+            
+            yield f"\n[========== ĐANG SINH {step['desc'].upper()} ==========]\n"
+            
+            for b in range(num_batches):
+                current_batch_size = batch_size
+                if b == num_batches - 1 and total_needed % batch_size != 0:
+                    current_batch_size = total_needed % batch_size
+                
+                yield f"-> Đang chạy mẻ {b+1}/{num_batches} (sinh {current_batch_size} đoạn văn) "
+                config = TOEIC_CONFIG.get(part_key)
+                system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size))
+                
+                batch_success = False
+                for attempt in range(3):
+                    try:
+                        response = client.chat.completions.create(
+                            model="Qwen/Qwen2.5-72B-Instruct",
+                            messages=[
+                                {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
+                                {"role": "user", "content": system_prompt}
+                            ],
+                            max_tokens=8192, temperature=0.2, stream=True 
+                        )
+                        
+                        raw_text = ""
+                        chunk_count = 0
+                        for chunk in response:
+                            if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta.content:
+                                raw_text += chunk.choices[0].delta.content
+                                chunk_count += 1
+                                if chunk_count % 30 == 0: yield "."
+                                    
+                        match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
+                        if match:
+                            parsed_data = json.loads(match.group(1), strict=False)
+                            if validate_generated_batch(parsed_data, current_batch_size, step["is_passage"]):
+                                full_test_data[part_key].extend(parsed_data)
+                                batch_success = True
+                                yield " [OK]\n"
+                                break
+                            else: yield " [LỖI VALIDATE - Thử lại]\n"
+                    except Exception as e: yield f" [LỖI: {str(e)}]\n"
+                    await asyncio.sleep(1)
+                    
+                if not batch_success: yield " [THẤT BẠI - Bỏ qua mẻ này]\n"
+                
+            yield "\n[HOÀN TẤT] Quá trình sinh Part 7 hoàn tất!\n\n---START_JSON---\n"
+            yield json.dumps(full_test_data, ensure_ascii=False)
+            yield "\n---END_JSON---\n"
+            
+        except Exception as e: yield f"\n[LỖI NGHIÊM TRỌNG]: {str(e)}\n"
+
+    return StreamingResponse(generate_reading_7(), media_type="text/plain")
 
 @router.post("/save-ai-test")
 async def save_ai_test_api(request: SaveAITestRequest, admin_id: int = 0):

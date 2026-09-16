@@ -472,33 +472,249 @@ async def build_200_questions_task(task_id: str, test_name: str, image_data_list
         nova_tasks[task_id]["message"] = str(e)
 
 
-@router.post("/generate-full-test")
-async def generate_full_test_api(
-    background_tasks: BackgroundTasks, 
+# =============================================================
+# ===   API SINH ĐỀ LISTENING STREAMING (PART 1 -> 4)        ===
+# =============================================================
+@router.post("/generate-listening-stream")
+async def generate_listening_stream_api(
     test_name: str = Form(...),
     images: List[UploadFile] = File(...)
 ):
+    if len(images) != 6:
+        return {"status": "error", "message": "Phải có đúng 6 ảnh cho Part 1."}
+        
+    image_data_list = []
+    for img in images:
+        bytes_data = await img.read()
+        image_data_list.append({"mime_type": img.content_type, "data": bytes_data})
+
+    async def generate_listening():
+        try:
+            full_test_data = {}
+            yield f"Đang khởi tạo tiến trình LISTENING: {test_name}\n"
+            
+            # --- PART 1 (VISION) ---
+            yield "\n[========== ĐANG SINH PART 1 ==========]\n"
+            full_test_data["part_1"] = []
+            config_p1 = TOEIC_CONFIG.get("part_1", {"system_prompt": "You are generating TOEIC Part 1."})
+            
+            # (Phần xử lý nhúng ID Dạng Bài giữ nguyên như code sếp gửi)
+            try:
+                db_p1 = get_db_connection()
+                cursor_p1 = db_p1.cursor(dictionary=True)
+                cursor_p1.execute("SELECT id, ten_dang FROM danh_muc_dang_bai WHERE part = 'part_1'")
+                danh_sach_dang = cursor_p1.fetchall()
+                db_p1.close()
+                menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
+                system_prompt_p1 = config_p1["system_prompt"] + f"\nTHÊM trường 'id_dang_bai' tương ứng. MENU: [{menu_dang_bai}]."
+            except:
+                system_prompt_p1 = config_p1["system_prompt"]
+
+            for idx, img_info in enumerate(image_data_list):
+                yield f"-> Đang xử lý ảnh {idx + 1}/6 "
+                try:
+                    encoded_string = base64.b64encode(img_info['data']).decode('utf-8')
+                    img_data_uri = f"data:{img_info['mime_type']};base64,{encoded_string}"
+                    
+                    response = client.chat.completions.create(
+                        model="Qwen/Qwen2.5-VL-72B-Instruct",
+                        messages=[
+                            {"role": "system", "content": "You are a professional TOEIC test generator."},
+                            {"role": "user", "content": [{"type": "text", "text": system_prompt_p1}, {"type": "image_url", "image_url": {"url": img_data_uri}}]}
+                        ],
+                        max_tokens=2048, temperature=0.2, stream=True
+                    )
+                    
+                    raw_text = ""
+                    chunk_count = 0
+                    for chunk in response:
+                        if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta.content:
+                            raw_text += chunk.choices[0].delta.content
+                            chunk_count += 1
+                            if chunk_count % 20 == 0: yield "." 
+                            
+                    match = re.search(r'(\{.*\}|\[.*\])', raw_text, re.DOTALL)
+                    clean_json = match.group(1) if match else raw_text
+                    parsed_data = json.loads(clean_json, strict=False)
+                    
+                    if isinstance(parsed_data, list):
+                        parsed_data[0]['hinh_anh'] = img_data_uri
+                        full_test_data["part_1"].extend(parsed_data)
+                    else:
+                        parsed_data['hinh_anh'] = img_data_uri
+                        full_test_data["part_1"].append(parsed_data)
+                    yield " [OK]\n"
+                except Exception as e:
+                    yield f" [LỖI: {str(e)}]\n"
+                await asyncio.sleep(1)
+
+            # --- PART 2 ĐẾN 4 ---
+            listening_structure = [
+                {"part": "part_2", "total": 25, "batch_size": 5, "is_passage": False, "desc": "Part 2"},
+                {"part": "part_3", "total": 13, "batch_size": 1, "is_passage": True, "desc": "Part 3"},
+                {"part": "part_4", "total": 10, "batch_size": 1, "is_passage": True, "desc": "Part 4"}
+            ]
+            
+            for step in listening_structure:
+                part_key = step["part"]
+                full_test_data[part_key] = []
+                total_needed = step["total"]
+                batch_size = step["batch_size"]
+                num_batches = (total_needed + batch_size - 1) // batch_size 
+                
+                yield f"\n[========== ĐANG SINH {step['desc'].upper()} ==========]\n"
+                
+                for b in range(num_batches):
+                    current_batch_size = batch_size
+                    if b == num_batches - 1 and total_needed % batch_size != 0:
+                        current_batch_size = total_needed % batch_size
+                    
+                    yield f"-> Đang chạy mẻ {b+1}/{num_batches} (sinh {current_batch_size} câu) "
+                    config = TOEIC_CONFIG.get(part_key)
+                    system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size))
+                    
+                    batch_success = False
+                    for attempt in range(3):
+                        try:
+                            response = client.chat.completions.create(
+                                model="Qwen/Qwen2.5-72B-Instruct",
+                                messages=[
+                                    {"role": "system", "content": "You are a professional TOEIC test generator."},
+                                    {"role": "user", "content": system_prompt}
+                                ],
+                                max_tokens=8192, temperature=0.2, stream=True 
+                            )
+                            
+                            raw_text = ""
+                            chunk_count = 0
+                            for chunk in response:
+                                if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta.content:
+                                    raw_text += chunk.choices[0].delta.content
+                                    chunk_count += 1
+                                    if chunk_count % 30 == 0: yield "."
+                                        
+                            match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
+                            if match:
+                                parsed_data = json.loads(match.group(1), strict=False)
+                                if validate_generated_batch(parsed_data, current_batch_size, step["is_passage"]):
+                                    full_test_data[part_key].extend(parsed_data)
+                                    batch_success = True
+                                    yield " [OK]\n"
+                                    break
+                                else: yield " [LỖI VALIDATE - Thử lại]\n"
+                        except Exception as e: yield f" [LỖI: {str(e)}]\n"
+                        await asyncio.sleep(1)
+                        
+                    if not batch_success: yield " [THẤT BẠI - Bỏ qua mẻ này]\n"
+                    
+            yield "\n[HOÀN TẤT] Quá trình sinh Listening hoàn tất!\n\n---START_JSON---\n"
+            yield json.dumps(full_test_data, ensure_ascii=False)
+            yield "\n---END_JSON---\n"
+            
+        except Exception as e: yield f"\n[LỖI NGHIÊM TRỌNG]: {str(e)}\n"
+
+    return StreamingResponse(generate_listening(), media_type="text/plain")
+
+
+# =============================================================
+# ===   API SINH ĐỀ READING STREAMING (PART 5 -> 7)          ===
+# =============================================================
+@router.post("/generate-reading-stream")
+async def generate_reading_stream_api(test_name: str = Form(...)):
+    async def generate_reading():
+        try:
+            full_test_data = {}
+            yield f"Đang khởi tạo tiến trình READING: {test_name}\n"
+            
+            reading_structure = [
+                {"part": "part_5", "total": 30, "batch_size": 5, "is_passage": False, "desc": "Part 5"},
+                {"part": "part_6", "total": 4,  "batch_size": 1, "is_passage": True, "desc": "Part 6"},
+                {"part": "part_7", "total": 15, "batch_size": 1, "is_passage": True, "desc": "Part 7"}
+            ]
+            
+            for step in reading_structure:
+                part_key = step["part"]
+                full_test_data[part_key] = []
+                total_needed = step["total"]
+                batch_size = step["batch_size"]
+                num_batches = (total_needed + batch_size - 1) // batch_size 
+                
+                yield f"\n[========== ĐANG SINH {step['desc'].upper()} ==========]\n"
+                
+                for b in range(num_batches):
+                    current_batch_size = batch_size
+                    if b == num_batches - 1 and total_needed % batch_size != 0:
+                        current_batch_size = total_needed % batch_size
+                    
+                    yield f"-> Đang chạy mẻ {b+1}/{num_batches} (sinh {current_batch_size} câu) "
+                    config = TOEIC_CONFIG.get(part_key)
+                    system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size))
+                    
+                    batch_success = False
+                    for attempt in range(3):
+                        try:
+                            response = client.chat.completions.create(
+                                model="Qwen/Qwen2.5-72B-Instruct",
+                                messages=[
+                                    {"role": "system", "content": "You are a professional TOEIC test generator."},
+                                    {"role": "user", "content": system_prompt}
+                                ],
+                                max_tokens=8192, temperature=0.2, stream=True 
+                            )
+                            
+                            raw_text = ""
+                            chunk_count = 0
+                            for chunk in response:
+                                if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta.content:
+                                    raw_text += chunk.choices[0].delta.content
+                                    chunk_count += 1
+                                    if chunk_count % 30 == 0: yield "."
+                                        
+                            match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
+                            if match:
+                                parsed_data = json.loads(match.group(1), strict=False)
+                                if validate_generated_batch(parsed_data, current_batch_size, step["is_passage"]):
+                                    full_test_data[part_key].extend(parsed_data)
+                                    batch_success = True
+                                    yield " [OK]\n"
+                                    break
+                                else: yield " [LỖI VALIDATE - Thử lại]\n"
+                        except Exception as e: yield f" [LỖI: {str(e)}]\n"
+                        await asyncio.sleep(1)
+                        
+                    if not batch_success: yield " [THẤT BẠI - Bỏ qua mẻ này]\n"
+                    
+            yield "\n[HOÀN TẤT] Quá trình sinh Reading hoàn tất!\n\n---START_JSON---\n"
+            yield json.dumps(full_test_data, ensure_ascii=False)
+            yield "\n---END_JSON---\n"
+            
+        except Exception as e: yield f"\n[LỖI NGHIÊM TRỌNG]: {str(e)}\n"
+
+    return StreamingResponse(generate_reading(), media_type="text/plain")
+
+@router.post("/save-ai-test")
+async def save_ai_test_api(request: SaveAITestRequest, admin_id: int = 0):
     try:
-        if len(images) != 6:
-            return {"status": "error", "message": "Phải có đúng 6 ảnh cho Part 1."}
-            
-        task_id = str(uuid.uuid4())
-        nova_tasks[task_id] = {"status": "processing", "progress": 0, "message": "Đang nạp dữ liệu ảnh..."}
+        db = get_db_connection()
+        cursor = db.cursor()
         
-        image_data_list = []
-        for img in images:
-            bytes_data = await img.read()
-            image_data_list.append({
-                "mime_type": img.content_type,
-                "data": bytes_data
-            })
-            
-        background_tasks.add_task(build_200_questions_task, task_id, test_name, image_data_list)
+        nam_phat_hanh = datetime.date.today().year
         
-        return {
-            "status": "success", 
-            "task_id": task_id
-        }
+        sql = "INSERT INTO de_thi_iig (ten_de, nguon_goc, nam_phat_hanh, dap_an_json) VALUES (%s, %s, %s, %s)"
+        sql = "INSERT INTO de_thi_iig (ten_de, nguon_goc, nam_phat_hanh, dap_an_json) VALUES (%s, %s, %s, %s)"
+        val = (request.test_name, 'ai_generated', nam_phat_hanh, request.dap_an_json)
+        
+        cursor.execute(sql, val)
+        id_de_thi_moi = cursor.lastrowid
+        
+        # Ghi log nếu có admin_id
+        if admin_id > 0:
+            chi_tiet_log = f"Đã duyệt và lưu đề AI: '{request.test_name}' (ID: #{id_de_thi_moi})"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'TAO_DE_AI', %s)", (admin_id, chi_tiet_log))
+
+        db.commit() 
+        db.close()
+        return {"status": "success", "message": "Đã lưu thành công!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -705,203 +921,3 @@ async def reset_nova():
     return {"status": "success"}
 
 
-@router.post("/generate-full-test-stream")
-async def generate_full_test_stream_api(
-    test_name: str = Form(...),
-    images: List[UploadFile] = File(...)
-):
-    if len(images) != 6:
-        return {"status": "error", "message": "Phải có đúng 6 ảnh cho Part 1."}
-        
-    # Đọc trước file ảnh vào RAM
-    image_data_list = []
-    for img in images:
-        bytes_data = await img.read()
-        image_data_list.append({
-            "mime_type": img.content_type,
-            "data": bytes_data
-        })
-
-    # GENERATOR: Liên tục trả dữ liệu về giao diện
-    async def generate_stream():
-        try:
-            full_test_data = {}
-            yield f"Đang khởi tạo tiến trình sinh đề: {test_name}\n"
-            
-            # ---------------- PART 1 ----------------
-            yield "\n[========== ĐANG SINH PART 1 ==========]\n"
-            full_test_data["part_1"] = []
-            config_p1 = TOEIC_CONFIG.get("part_1", {"system_prompt": "You are generating TOEIC Part 1."})
-            
-            try:
-                db_p1 = get_db_connection()
-                cursor_p1 = db_p1.cursor(dictionary=True)
-                cursor_p1.execute("SELECT id, ten_dang FROM danh_muc_dang_bai WHERE part = 'part_1'")
-                danh_sach_dang = cursor_p1.fetchall()
-                db_p1.close()
-                menu_dang_bai = ", ".join([f"ID {r['id']}: '{r['ten_dang']}'" for r in danh_sach_dang])
-                strict_rule = f"\nYÊU CẦU AUTO-TAGGING: Hãy THÊM trường 'id_dang_bai' vào JSON. MENU: [{menu_dang_bai}]."
-                system_prompt_p1 = config_p1["system_prompt"] + strict_rule
-            except Exception:
-                system_prompt_p1 = config_p1["system_prompt"]
-
-            for idx, img_info in enumerate(image_data_list):
-                yield f"-> Đang xử lý ảnh {idx + 1}/6 "
-                try:
-                    image_bytes = img_info['data']
-                    encoded_string = base64.b64encode(image_bytes).decode('utf-8')
-                    img_data_uri = f"data:{img_info['mime_type']};base64,{encoded_string}"
-                    
-                    response = client.chat.completions.create(
-                        model="Qwen/Qwen2.5-VL-72B-Instruct",
-                        messages=[
-                            {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
-                            {
-                                "role": "user",
-                                "content": [
-                                    {"type": "text", "text": system_prompt_p1},
-                                    {"type": "image_url", "image_url": {"url": img_data_uri}}
-                                ]
-                            }
-                        ],
-                        max_tokens=2048,
-                        temperature=0.2,
-                        stream=True  # Chống 504 Timeout
-                    )
-                    
-                    raw_text = ""
-                    chunk_count = 0
-                    for chunk in response:
-                        # FIX LỖI VÀ GIẢM SPAM DẤU CHẤM
-                        if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta.content:
-                            raw_text += chunk.choices[0].delta.content
-                            chunk_count += 1
-                            if chunk_count % 20 == 0:
-                                yield "." 
-                            
-                    # Bóc tách JSON
-                    match = re.search(r'(\{.*\}|\[.*\])', raw_text, re.DOTALL)
-                    clean_json = match.group(1) if match else raw_text
-                    parsed_data = json.loads(clean_json, strict=False)
-                    
-                    if isinstance(parsed_data, list) and len(parsed_data) > 0:
-                        parsed_data[0]['hinh_anh'] = img_data_uri
-                        full_test_data["part_1"].extend(parsed_data)
-                    elif isinstance(parsed_data, dict):
-                        parsed_data['hinh_anh'] = img_data_uri
-                        full_test_data["part_1"].append(parsed_data)
-                        
-                    yield " [OK]\n"
-                except Exception as e:
-                    yield f" [LỖI: {str(e)}]\n"
-                    
-                await asyncio.sleep(1)
-
-            # ---------------- PART 2 ĐẾN 7 ----------------
-            toeic_structure = [
-                {"part": "part_2", "total": 25, "batch_size": 5, "is_passage": False, "desc": "Part 2"},
-                {"part": "part_3", "total": 13, "batch_size": 1, "is_passage": True, "desc": "Part 3"},
-                {"part": "part_4", "total": 10, "batch_size": 1, "is_passage": True, "desc": "Part 4"},
-                {"part": "part_5", "total": 30, "batch_size": 5, "is_passage": False, "desc": "Part 5"},
-                {"part": "part_6", "total": 4,  "batch_size": 1, "is_passage": True, "desc": "Part 6"},
-                {"part": "part_7", "total": 15, "batch_size": 1, "is_passage": True, "desc": "Part 7"}
-            ]
-            
-            for step in toeic_structure:
-                part_key = step["part"]
-                full_test_data[part_key] = []
-                total_needed = step["total"]
-                batch_size = step["batch_size"]
-                is_passage = step["is_passage"]
-                num_batches = (total_needed + batch_size - 1) // batch_size 
-                
-                yield f"\n[========== ĐANG SINH {step['desc'].upper()} ==========]\n"
-                
-                for b in range(num_batches):
-                    current_batch_size = batch_size
-                    if b == num_batches - 1 and total_needed % batch_size != 0:
-                        current_batch_size = total_needed % batch_size
-                    
-                    yield f"-> Đang chạy mẻ {b+1}/{num_batches} (sinh {current_batch_size} câu) "
-                    config = TOEIC_CONFIG.get(part_key)
-                    system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size))
-                    
-                    max_retries = 3
-                    batch_success = False
-                    
-                    for attempt in range(max_retries):
-                        try:
-                            response = client.chat.completions.create(
-                                model="Qwen/Qwen2.5-72B-Instruct",
-                                messages=[
-                                    {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
-                                    {"role": "user", "content": system_prompt}
-                                ],
-                                max_tokens=8192,
-                                temperature=0.2,
-                                stream=True 
-                            )
-                            
-                            raw_text = ""
-                            chunk_count = 0
-                            for chunk in response:
-                                # FIX LỖI INDEX OUT OF RANGE VÀ GIẢM SPAM DẤU CHẤM
-                                if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta.content:
-                                    raw_text += chunk.choices[0].delta.content
-                                    chunk_count += 1
-                                    if chunk_count % 30 == 0:
-                                        yield "."
-                                        
-                            match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
-                            if match:
-                                parsed_data = json.loads(match.group(1), strict=False)
-                                if validate_generated_batch(parsed_data, current_batch_size, is_passage):
-                                    full_test_data[part_key].extend(parsed_data)
-                                    batch_success = True
-                                    yield " [OK]\n"
-                                    break
-                                else:
-                                    yield " [LỖI VALIDATE - Thử lại]\n"
-                        except Exception as e:
-                            yield f" [LỖI: {str(e)}]\n"
-                        await asyncio.sleep(1)
-                        
-                    if not batch_success:
-                         yield " [THẤT BẠI - Bỏ qua mẻ này]\n"
-                    
-            # HOÀN TẤT - XUẤT JSON ĐỂ JS ĐỌC
-            yield "\n[HOÀN TẤT] Quá trình phân tích hoàn tất!\n"
-            yield "\n\n---START_JSON---\n"
-            yield json.dumps(full_test_data, ensure_ascii=False)
-            yield "\n---END_JSON---\n"
-            
-        except Exception as general_error:
-            yield f"\n[LỖI NGHIÊM TRỌNG]: {str(general_error)}\n"
-
-    return StreamingResponse(generate_stream(), media_type="text/plain")
-
-@router.post("/save-ai-test")
-async def save_ai_test_api(request: SaveAITestRequest, admin_id: int = 0):
-    try:
-        db = get_db_connection()
-        cursor = db.cursor()
-        
-        nam_phat_hanh = datetime.date.today().year
-        
-        sql = "INSERT INTO de_thi_iig (ten_de, nguon_goc, nam_phat_hanh, dap_an_json) VALUES (%s, %s, %s, %s)"
-        sql = "INSERT INTO de_thi_iig (ten_de, nguon_goc, nam_phat_hanh, dap_an_json) VALUES (%s, %s, %s, %s)"
-        val = (request.test_name, 'ai_generated', nam_phat_hanh, request.dap_an_json)
-        
-        cursor.execute(sql, val)
-        id_de_thi_moi = cursor.lastrowid
-        
-        # Ghi log nếu có admin_id
-        if admin_id > 0:
-            chi_tiet_log = f"Đã duyệt và lưu đề AI: '{request.test_name}' (ID: #{id_de_thi_moi})"
-            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'TAO_DE_AI', %s)", (admin_id, chi_tiet_log))
-
-        db.commit() 
-        db.close()
-        return {"status": "success", "message": "Đã lưu thành công!"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}

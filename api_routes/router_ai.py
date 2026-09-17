@@ -6,6 +6,17 @@ import re
 import asyncio
 import os
 import datetime
+import random
+
+TOEIC_DYNAMIC_TOPICS = [
+    "Phỏng vấn ứng viên mới", "Lỗi phần mềm máy tính", "Đặt tiệc tại nhà hàng", "Thay đổi lịch trình bay", 
+    "Hỏng hóc máy móc trong nhà máy", "Thanh toán hóa đơn trễ hạn", "Khảo sát ý kiến khách hàng", 
+    "Tổ chức hội thảo thường niên", "Chính sách nghỉ phép của công ty", "Thuê mặt bằng văn phòng", 
+    "Thất lạc hành lý tại sân bay", "Lịch trình tàu hỏa thay đổi", "Gia hạn hợp đồng thuê nhà",
+    "Khai trương triển lãm nghệ thuật", "Lỗi giao hàng sai địa chỉ", "Chế độ bảo hiểm y tế",
+    "Chương trình khuyến mãi tại siêu thị", "Quy định an toàn lao động", "Đăng ký thẻ hội viên phòng gym",
+    "Gọi thợ sửa ống nước", "Kiểm toán tài chính cuối năm", "Mua sắm thiết bị văn phòng"
+]
 
 from huggingface_hub import InferenceClient
 from fastapi.responses import StreamingResponse
@@ -583,7 +594,8 @@ async def generate_listening_stream_api(
                     
                     yield f"-> Đang chạy mẻ {b+1}/{num_batches} (sinh {current_batch_size} câu) "
                     config = TOEIC_CONFIG.get(part_key)
-                    system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size))
+                    random_topics = ", ".join(random.sample(TOEIC_DYNAMIC_TOPICS, 3))
+                    system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size)).replace("{random_topics}", random_topics)
                     
                     batch_success = False
                     for attempt in range(3):
@@ -659,7 +671,9 @@ async def generate_reading_56_stream_api(test_name: str = Form(...)):
                     
                     yield f"-> Đang chạy mẻ {b+1}/{num_batches} (sinh {current_batch_size} câu) "
                     config = TOEIC_CONFIG.get(part_key)
-                    system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size))
+                    random_topics = ", ".join(random.sample(TOEIC_DYNAMIC_TOPICS, 3))
+                    system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size)).replace("{random_topics}", random_topics)
+                                        
                     
                     batch_success = False
                     for attempt in range(3):
@@ -714,23 +728,36 @@ async def generate_reading_7_stream_api(test_name: str = Form(...)):
             full_test_data = {}
             yield f"Đang khởi tạo tiến trình Part 7 (Đọc hiểu sâu): {test_name}\n"
             
-            step = {"part": "part_7", "total": 15, "batch_size": 1, "is_passage": True, "desc": "Part 7"}
-            part_key = step["part"]
+            # CHIA KHUNG CHUẨN XÁC 15 ĐOẠN VĂN - TỔNG 54 CÂU HỎI
+            part_7_structure = [
+                {"type": "Đoạn đơn ngắn (Tin nhắn, Lịch trình, Hóa đơn)", "q_count": 2},
+                {"type": "Đoạn đơn ngắn (Tin nhắn, Lịch trình, Hóa đơn)", "q_count": 2},
+                {"type": "Đoạn đơn ngắn (Tin nhắn, Lịch trình, Hóa đơn)", "q_count": 2},
+                {"type": "Đoạn đơn ngắn (Tin nhắn, Lịch trình, Hóa đơn)", "q_count": 2},
+                {"type": "Đoạn đơn trung bình (Thông báo, Quảng cáo)", "q_count": 3},
+                {"type": "Đoạn đơn trung bình (Thông báo, Quảng cáo)", "q_count": 3},
+                {"type": "Đoạn đơn trung bình (Thông báo, Quảng cáo)", "q_count": 3},
+                {"type": "Đoạn đơn dài (Bài báo, Đánh giá)", "q_count": 4},
+                {"type": "Đoạn đơn dài (Bài báo, Đánh giá)", "q_count": 4},
+                {"type": "Đoạn đơn dài (Bài báo, Đánh giá)", "q_count": 4},
+                {"type": "Đoạn kép (2 văn bản liên quan)", "q_count": 5},
+                {"type": "Đoạn kép (2 văn bản liên quan)", "q_count": 5},
+                {"type": "Đoạn ba (3 văn bản liên quan)", "q_count": 5},
+                {"type": "Đoạn ba (3 văn bản liên quan)", "q_count": 5},
+                {"type": "Đoạn ba (3 văn bản liên quan)", "q_count": 5}
+            ]
+            
+            part_key = "part_7"
             full_test_data[part_key] = []
-            total_needed = step["total"]
-            batch_size = step["batch_size"]
-            num_batches = (total_needed + batch_size - 1) // batch_size 
             
-            yield f"\n[========== ĐANG SINH {step['desc'].upper()} ==========]\n"
+            yield f"\n[========== ĐANG SINH PART 7 (54 CÂU) ==========]\n"
             
-            for b in range(num_batches):
-                current_batch_size = batch_size
-                if b == num_batches - 1 and total_needed % batch_size != 0:
-                    current_batch_size = total_needed % batch_size
+            for idx, batch in enumerate(part_7_structure):
+                yield f"-> Đang chạy mẻ {idx+1}/15 (sinh {batch['q_count']} câu - {batch['type']}) "
                 
-                yield f"-> Đang chạy mẻ {b+1}/{num_batches} (sinh {current_batch_size} đoạn văn) "
                 config = TOEIC_CONFIG.get(part_key)
-                system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size))
+                random_topics = ", ".join(random.sample(TOEIC_DYNAMIC_TOPICS, 3))
+                system_prompt = config["system_prompt"].replace("{format_type}", batch['type']).replace("{exact_q_count}", str(batch['q_count'])).replace("{random_topics}", random_topics)
                 
                 batch_success = False
                 for attempt in range(3):
@@ -741,7 +768,7 @@ async def generate_reading_7_stream_api(test_name: str = Form(...)):
                                 {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
                                 {"role": "user", "content": system_prompt}
                             ],
-                            max_tokens=8192, temperature=0.2, stream=True 
+                            max_tokens=8192, temperature=0.3, stream=True 
                         )
                         
                         raw_text = ""
@@ -755,11 +782,15 @@ async def generate_reading_7_stream_api(test_name: str = Form(...)):
                         match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
                         if match:
                             parsed_data = json.loads(match.group(1), strict=False)
-                            if validate_generated_batch(parsed_data, current_batch_size, step["is_passage"]):
-                                full_test_data[part_key].extend(parsed_data)
-                                batch_success = True
-                                yield " [OK]\n"
-                                break
+                            # Validate ép buộc đúng số lượng câu hỏi đã định
+                            if validate_generated_batch(parsed_data, 1, True):
+                                # Kiểm tra xem mảng câu hỏi con có đúng số lượng không
+                                if len(parsed_data[0].get('danh_sach_cau_hoi', [])) == batch['q_count']:
+                                    full_test_data[part_key].extend(parsed_data)
+                                    batch_success = True
+                                    yield " [OK]\n"
+                                    break
+                                else: yield " [LỖI: Sai số lượng câu - Thử lại]\n"
                             else: yield " [LỖI VALIDATE - Thử lại]\n"
                     except Exception as e: yield f" [LỖI: {str(e)}]\n"
                     await asyncio.sleep(1)

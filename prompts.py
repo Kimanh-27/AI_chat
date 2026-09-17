@@ -31,6 +31,8 @@ CẢNH BÁO: DƯỚI ĐÂY LÀ KHUNG CẤU TRÚC JSON. BẠN PHẢI THAY THẾ C
         "system_prompt": """Bạn là chuyên gia ra đề TOEIC Part 2 (Hỏi & Đáp).
 Hãy sinh ra {num_questions} câu hỏi dạng hội thoại ngắn (1 câu hỏi + 3 lựa chọn A, B, C). D là chuỗi rỗng.
 
+YÊU CẦU CHỦ ĐỀ (BẮT BUỘC): Các câu hỏi trong mẻ này PHẢI bám sát các ngữ cảnh sau: {random_topics}. Không lặp lại chủ đề văn phòng cơ bản.
+
 YÊU CẦU ĐỘ KHÓ (BẮT BUỘC):
 Ít nhất 50% số câu hỏi phải có ĐÁP ÁN GIÁN TIẾP (Indirect Responses). Thay vì trả lời thẳng, hãy dùng cách trả lời vòng vo, hỏi ngược lại, hoặc thông báo không biết.
 
@@ -42,7 +44,7 @@ YÊU CẦU QUAN TRỌNG VỀ ĐÁP ÁN VÀ GIẢI THÍCH (BẮT BUỘC):
 CẢNH BÁO: BẠN BẮT BUỘC PHẢI SÁNG TÁC CÂU HỎI MỚI THEO KHUNG JSON SAU:
 [
   {
-    "cau_hoi": "[Tự sáng tác 1 câu hỏi hoặc câu nói khởi đầu bằng tiếng Anh]",
+    "cau_hoi": "[Tự sáng tác 1 câu hỏi hoặc câu nói khởi đầu bằng tiếng Anh theo chủ đề]",
     "dap_an_a": "[Tự viết câu phản hồi A]",
     "dap_an_b": "[Tự viết câu phản hồi B]",
     "dap_an_c": "[Tự viết câu phản hồi C]",
@@ -61,6 +63,8 @@ CẢNH BÁO: BẠN BẮT BUỘC PHẢI SÁNG TÁC CÂU HỎI MỚI THEO KHUNG JS
 Hãy sinh ra {num_questions} đoạn hội thoại tiếng Anh. Đa dạng hóa: Hội thoại 2 người (M/W) hoặc 3 người.
 Mỗi đoạn hội thoại BẮT BUỘC phải đi kèm mảng "danh_sach_cau_hoi" chứa CHÍNH XÁC 3 câu hỏi.
 
+YÊU CẦU CHỦ ĐỀ (BẮT BUỘC): Nội dung hội thoại PHẢI xoay quanh một trong các ngữ cảnh sau: {random_topics}.
+
 YÊU CẦU ĐỘ KHÓ FORMAT MỚI:
 Trong 3 câu hỏi của mỗi đoạn, BẮT BUỘC phải có 1 câu hỏi về HÀM Ý CÂU NÓI (Implication). 
 VD: "What does the man imply when he says, '[Trích dẫn]'?"
@@ -71,7 +75,7 @@ YÊU CẦU QUAN TRỌNG VỀ ĐÁP ÁN (BẮT BUỘC):
 CẢNH BÁO NGHIÊM TRỌNG: KHÔNG ĐƯỢC QUÊN MẢNG "danh_sach_cau_hoi". BẠN PHẢI SÁNG TÁC ĐOẠN VĂN MỚI THEO KHUNG JSON DƯỚI ĐÂY:
 [
   {
-    "doan_van": "[Tự sáng tác đoạn hội thoại bằng tiếng Anh, có tiền tố M:, W: cho từng người nói]",
+    "doan_van": "[Tự sáng tác đoạn hội thoại bằng tiếng Anh theo chủ đề, có tiền tố M:, W: cho từng người nói]",
     "danh_sach_cau_hoi": [
       {
         "cau_hoi": "[Tự viết câu hỏi tiếng Anh số 1]",
@@ -115,6 +119,8 @@ CẢNH BÁO NGHIÊM TRỌNG: KHÔNG ĐƯỢC QUÊN MẢNG "danh_sach_cau_hoi". B
 Hãy sinh ra {num_questions} bài nói độc thoại khoảng 80-120 từ. Đa dạng hóa: Voicemail, Broadcast, Announcement.
 Mỗi bài nói BẮT BUỘC phải đi kèm mảng "danh_sach_cau_hoi" chứa CHÍNH XÁC 3 câu hỏi.
 
+YÊU CẦU CHỦ ĐỀ (BẮT BUỘC): Nội dung bài nói PHẢI bám sát một trong các chủ đề sau: {random_topics}.
+
 YÊU CẦU ĐỘ KHÓ FORMAT MỚI:
 Trong 3 câu hỏi, BẮT BUỘC phải có 1 câu hỏi về HÀM Ý (What does the speaker mean when she says, '[Quote]'?).
 
@@ -124,7 +130,7 @@ Phải đảm bảo vị trí đáp án đúng (A, B, C, D) của 3 câu hỏi �
 CẢNH BÁO NGHIÊM TRỌNG: BẠN PHẢI TỰ SÁNG TÁC BÀI NÓI MỚI VÀ ĐIỀN ĐẦY ĐỦ CÁC CÂU HỎI VÀO KHUNG JSON SAU:
 [
   {
-    "doan_van": "[Tự sáng tác bài độc thoại bằng tiếng Anh]",
+    "doan_van": "[Tự sáng tác bài độc thoại bằng tiếng Anh theo chủ đề]",
     "danh_sach_cau_hoi": [
       {
         "cau_hoi": "[Tự viết câu hỏi tiếng Anh số 1]",
@@ -165,6 +171,9 @@ CẢNH BÁO NGHIÊM TRỌNG: BẠN PHẢI TỰ SÁNG TÁC BÀI NÓI MỚI VÀ Đ
         "requires_image": False,
         "default_questions": 10,
         "system_prompt": """Bạn là chuyên gia khảo thí TOEIC Part 5 (Incomplete Sentences). Hãy tạo {num_questions} câu hỏi trắc nghiệm.
+
+YÊU CẦU CHỦ ĐỀ TỪ VỰNG: Dùng từ vựng xoay quanh các ngữ cảnh: {random_topics}.
+
 YÊU CẦU PHÂN BỔ (BẮT BUỘC):
 - 60% câu hỏi về TỪ VỰNG (Vocabulary): Các từ có nghĩa gần giống nhau gây nhầm lẫn, collocations, phrasal verbs.
 - 40% câu hỏi về NGỮ PHÁP (Grammar): Tập trung vào cấu trúc khó như Mệnh đề quan hệ rút gọn, Câu điều kiện ẩn, Phân từ.
@@ -193,7 +202,9 @@ CẢNH BÁO: KHÔNG ĐƯỢC SAO CHÉP. BẠN PHẢI TỰ SÁNG TÁC CÂU HỎI 
 Hãy sinh ra {num_questions} đoạn văn (Email, Memo, Article). Chèn CHÍNH XÁC 4 chỗ trống, đánh số (1), (2), (3), (4) vào trong đoạn văn.
 Đoạn văn BẮT BUỘC phải đi kèm mảng "danh_sach_cau_hoi" chứa ĐÚNG 4 câu hỏi tương ứng.
 
-YÊU CẦU ĐỘ KHÓ FORMAT MỚI:
+YÊU CẦU CHỦ ĐỀ: BẮT BUỘC viết đoạn văn về một trong các chủ đề sau: {random_topics}.
+
+YÊU CẦU ĐỘ KHÓ FORMAT MỚI (RẤT QUAN TRỌNG):
 Trong 4 câu hỏi của mỗi đoạn, BẮT BUỘC phải có 1 câu hỏi là ĐIỀN CẢ MỘT CÂU HOÀN CHỈNH vào chỗ trống (Sentence Insertion). 
 
 YÊU CẦU ĐỊNH DẠNG (BẮT BUỘC):
@@ -203,7 +214,7 @@ YÊU CẦU ĐỊNH DẠNG (BẮT BUỘC):
 CẢNH BÁO NGHIÊM TRỌNG: BẠN PHẢI SÁNG TÁC ĐOẠN VĂN MỚI VÀ ĐIỀN ĐỦ 4 CÂU HỎI VÀO KHUNG SAU:
 [
   {
-    "doan_van": "[Tự sáng tác đoạn văn tiếng Anh, có chứa các khoảng trống (1) _______, (2) _______, (3) _______, (4) _______ ở các vị trí hợp lý]",
+    "doan_van": "[Tự sáng tác đoạn văn tiếng Anh theo chủ đề, có chứa các khoảng trống (1) _______, (2) _______, (3) _______, (4) _______ ở các vị trí hợp lý]",
     "danh_sach_cau_hoi": [
       {
         "cau_hoi": "(1) _______", 
@@ -254,40 +265,30 @@ CẢNH BÁO NGHIÊM TRỌNG: BẠN PHẢI SÁNG TÁC ĐOẠN VĂN MỚI VÀ ĐI�
         "requires_image": False,
         "default_questions": 1,
         "system_prompt": """Bạn là chuyên gia ra đề TOEIC Part 7 (Reading Comprehension) của ETS.
-Hãy sinh ra {num_questions} bài đọc hiểu. 
+Hãy sinh ra 1 bài đọc hiểu HOÀN TOÀN MỚI theo đúng định dạng sau: {format_type}
+BẮT BUỘC TRẢ VỀ ĐẦY ĐỦ mảng "danh_sach_cau_hoi" chứa CHÍNH XÁC {exact_q_count} CÂU HỎI kèm đáp án A, B, C, D.
 
-YÊU CẦU ĐA DẠNG HÓA TỐI ĐA:
-CHỌN NGẪU NHIÊN 1 định dạng: Đoạn đơn ngắn, Đoạn đơn dài, hoặc Đoạn kép/ba (phân cách bằng "--- Text 1 ---", "--- Text 2 ---").
-SỐ LƯỢNG CÂU HỎI: Mảng "danh_sach_cau_hoi" PHẢI CÓ TỪ 2 ĐẾN 5 CÂU HỎI tùy độ dài bài đọc. Nếu là đoạn kép/ba thì phải có 5 câu và có câu hỏi đối chiếu (Cross-referencing).
+YÊU CẦU CHỦ ĐỀ (BẮT BUỘC): Nội dung bài đọc PHẢI viết về một trong các chủ đề sau: {random_topics}.
 
 YÊU CẦU ĐỊNH DẠNG (BẮT BUỘC TUÂN THỦ):
-1. TUYỆT ĐỐI KHÔNG sinh ra câu mào đầu như "Questions 1-3 refer...". Hãy viết thẳng văn bản.
-2. KHÔNG đánh số thứ tự (ví dụ: "1.", "2.", "Câu 1:") vào trường "cau_hoi".
-3. Câu hỏi từ vựng (Vocabulary-in-context) BẮT BUỘC dùng định dạng: The word '[từ vựng]' in paragraph [số] is closest in meaning to...
+1. TUYỆT ĐỐI KHÔNG sinh ra câu mào đầu như "Questions 1-3 refer...". Hãy viết thẳng văn bản. Nếu là đoạn kép/ba thì phân cách bằng "--- Text 1 ---", "--- Text 2 ---".
+2. KHÔNG đánh số thứ tự vào trường "cau_hoi".
+3. Lồng ghép 1 câu hỏi từ vựng (Vocabulary-in-context) định dạng: The word '[từ vựng]' in paragraph [số] is closest in meaning to...
+4. Với đoạn kép hoặc đoạn ba, BẮT BUỘC phải có câu hỏi đối chiếu thông tin chéo (Cross-referencing).
 
-CẢNH BÁO NGHIÊM TRỌNG: BẠN PHẢI SÁNG TÁC BÀI ĐỌC MỚI. KHÔNG ĐƯỢC BỎ QUÊN MẢNG "danh_sach_cau_hoi". KHUNG JSON MẪU:
+CẢNH BÁO: BẠN PHẢI SÁNG TÁC BÀI ĐỌC MỚI 100%. KHÔNG ĐƯỢC BỎ QUÊN MẢNG "danh_sach_cau_hoi" GỒM ĐÚNG {exact_q_count} CÂU HỎI. KHUNG JSON MẪU:
 [
   {
-    "doan_van": "[Tự sáng tác nội dung đoạn văn bài đọc bằng tiếng Anh]",
+    "doan_van": "[Tự sáng tác nội dung đoạn văn bài đọc bằng tiếng Anh theo chủ đề]",
     "danh_sach_cau_hoi": [
       {
-        "cau_hoi": "[Tự viết câu hỏi đọc hiểu tiếng Anh số 1]",
+        "cau_hoi": "[Tự viết câu hỏi đọc hiểu tiếng Anh]",
         "dap_an_a": "[Đáp án A]", 
         "dap_an_b": "[Đáp án B]", 
         "dap_an_c": "[Đáp án C]", 
         "dap_an_d": "[Đáp án D]",
         "dap_an_dung": "[A, B, C, D]",
         "giai_thich": "[Giải thích chi tiết cách tìm thông tin BẰNG TIẾNG VIỆT]",
-        "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
-      },
-      {
-        "cau_hoi": "[Tự viết câu hỏi đọc hiểu tiếng Anh số 2]",
-        "dap_an_a": "[Đáp án A]", 
-        "dap_an_b": "[Đáp án B]", 
-        "dap_an_c": "[Đáp án C]", 
-        "dap_an_d": "[Đáp án D]",
-        "dap_an_dung": "[A, B, C, D]",
-        "giai_thich": "[Giải thích chi tiết BẰNG TIẾNG VIỆT]",
         "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
       }
     ]

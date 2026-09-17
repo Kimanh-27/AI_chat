@@ -33,13 +33,19 @@ Hãy sinh ra {num_questions} câu hỏi dạng hội thoại ngắn (1 câu hỏ
 
 YÊU CẦU CHỦ ĐỀ (BẮT BUỘC): Các câu hỏi trong mẻ này PHẢI bám sát các ngữ cảnh sau: {random_topics}. Không lặp lại chủ đề văn phòng cơ bản.
 
-YÊU CẦU ĐỘ KHÓ (BẮT BUỘC):
-Ít nhất 50% số câu hỏi phải có ĐÁP ÁN GIÁN TIẾP (Indirect Responses). Thay vì trả lời thẳng, hãy dùng cách trả lời vòng vo, hỏi ngược lại, hoặc thông báo không biết.
+QUY TẮC SỐNG CÒN VỀ ĐÁP ÁN (CHỐNG GÂY TRANH CÃI):
+1. Chỉ được phép có DUY NHẤT 1 đáp án hợp lý.
+2. Hai đáp án sai (Distractors) BẮT BUỘC phải VÔ LÝ hoàn toàn trong ngữ cảnh đó. Phải áp dụng các bẫy đặc trưng của TOEIC như:
+   - Bẫy lặp từ / bẫy từ liên quan (Ví dụ: Hỏi về "refund", đáp án sai có từ "fund" nhưng câu hoàn toàn vô nghĩa).
+   - Sai chủ ngữ (Hỏi "You" trả lời "He/She").
+   - Sai thì (Hỏi tương lai trả lời quá khứ).
+   - Trả lời Yes/No cho câu hỏi Wh-question.
+TUYỆT ĐỐI KHÔNG đưa ra các đáp án sai mà ngoài đời thực người ta vẫn có thể nói. Hai đáp án sai phải sai một cách rõ ràng về mặt ngữ pháp hoặc logic đối đáp.
 
-YÊU CẦU QUAN TRỌNG VỀ ĐÁP ÁN VÀ GIẢI THÍCH (BẮT BUỘC):
-1. Phân bổ đáp án đúng (A, B, C) NGẪU NHIÊN VÀ ĐỒNG ĐỀU. Không được dồn vào 1 đáp án.
-2. Phần "giai_thich" BẮT BUỘC trình bày theo ĐÚNG FORMAT SAU (chú ý khoảng cách \\n\\n):
-'[Câu hỏi tiếng Anh]' ([Nghĩa tiếng Việt])\\n\\nPhân tích chi tiết\\n\\nA. [Nội dung đáp án A]\\n* Đúng/Sai. [Giải thích chi tiết, phân tích bẫy]\\n\\nB. [Nội dung đáp án B]\\n* Đúng/Sai. [Giải thích chi tiết, phân tích bẫy]\\n\\nC. [Nội dung đáp án C]\\n* Đúng/Sai. [Giải thích chi tiết, phân tích bẫy]
+YÊU CẦU ĐỘ KHÓ: Ít nhất 50% số câu hỏi có ĐÁP ÁN GIÁN TIẾP (Indirect Responses), nhưng 2 lựa chọn còn lại vẫn phải đảm bảo sai hoàn toàn.
+
+YÊU CẦU ĐÁP ÁN: Phân bổ đáp án đúng (A, B, C) NGẪU NHIÊN.
+Phần "giai_thich" trình bày theo format: '[Câu hỏi]' ([Nghĩa])\\n\\nPhân tích chi tiết\\n\\nA. [Nội dung]\\n* Đúng/Sai. [Giải thích phân tích bẫy]
 
 CẢNH BÁO: BẠN BẮT BUỘC PHẢI SÁNG TÁC CÂU HỎI MỚI THEO KHUNG JSON SAU:
 [

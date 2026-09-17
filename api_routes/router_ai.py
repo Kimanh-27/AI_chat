@@ -295,16 +295,28 @@ def validate_generated_batch(parsed_data, expected_count, is_passage=False):
         
     for item in parsed_data:
         if is_passage:
-            if 'doan_van' not in item or 'danh_sach_cau_hoi' not in item:
+            # Bắt lỗi không có đoạn văn hoặc đoạn văn bị rỗng
+            if 'doan_van' not in item or not str(item['doan_van']).strip():
+                return False
+            # Bắt lỗi không có mảng câu hỏi hoặc mảng bị rỗng
+            if 'danh_sach_cau_hoi' not in item or not isinstance(item['danh_sach_cau_hoi'], list) or len(item['danh_sach_cau_hoi']) == 0:
                 return False
             questions = item['danh_sach_cau_hoi']
         else:
             questions = [item]
             
         for q in questions:
-            if not all(k in q for k in ['cau_hoi', 'dap_an_a', 'dap_an_b', 'dap_an_c', 'dap_an_d', 'dap_an_dung']):
+            keys = ['cau_hoi', 'dap_an_a', 'dap_an_b', 'dap_an_c', 'dap_an_d', 'dap_an_dung']
+            if not all(k in q for k in keys):
                 return False
-            if q['dap_an_dung'] not in ['A', 'B', 'C', 'D']:
+        
+            if not str(q['cau_hoi']).strip(): return False
+            if not str(q['dap_an_a']).strip(): return False
+            if not str(q['dap_an_b']).strip(): return False
+            if not str(q['dap_an_c']).strip(): return False
+            # Không bắt buộc dap_an_d vì Part 2 chỉ có 3 đáp án
+            
+            if str(q['dap_an_dung']).strip().upper() not in ['A', 'B', 'C', 'D']:
                 return False
     return True
 

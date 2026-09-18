@@ -92,14 +92,30 @@ async def get_ai_generated_tests():
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        # Chỉ lấy riêng các đề do AI tự động tạo
+        
         cursor.execute("""
-            SELECT id, ten_de, nam_phat_hanh, ngay_tao, nguon_goc 
-            FROM de_thi_iig 
-            WHERE nguon_goc = 'ai_generated' 
-            ORDER BY ngay_tao DESC
+            SELECT 
+                d.id, 
+                d.ten_de, 
+                d.nam_phat_hanh, 
+                d.nguon_goc,
+                COALESCE(t.ho_ten, 'Không rõ') AS nguoi_tao,
+                COALESCE(n.thoi_gian, d.ngay_tao) AS ngay_tao
+            FROM de_thi_iig d
+            LEFT JOIN nhat_ky_hoat_dong n 
+                ON n.loai_hanh_dong = 'TAO_DE_AI' 
+                AND n.chi_tiet LIKE CONCAT('%(ID: #', d.id, ')%')
+            LEFT JOIN tai_khoan t 
+                ON n.id_tai_khoan = t.id
+            WHERE d.nguon_goc = 'ai_generated' 
+            ORDER BY d.id DESC
         """)
         tests = cursor.fetchall()
+        
+        for test in tests:
+            if test['ngay_tao']:
+                test['ngay_tao'] = test['ngay_tao'].strftime('%d/%m/%Y %H:%M')
+                
         db.close()
         return {"status": "success", "data": tests}
     except Exception as e:

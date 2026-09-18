@@ -816,17 +816,17 @@ async def save_ai_test_api(request: SaveAITestRequest, admin_id: int = 0):
         
         nam_phat_hanh = datetime.date.today().year
         
-        sql = "INSERT INTO de_thi_iig (ten_de, nguon_goc, nam_phat_hanh, dap_an_json) VALUES (%s, %s, %s, %s)"
-        sql = "INSERT INTO de_thi_iig (ten_de, nguon_goc, nam_phat_hanh, dap_an_json) VALUES (%s, %s, %s, %s)"
-        val = (request.test_name, 'ai_generated', nam_phat_hanh, request.dap_an_json)
-        
-        cursor.execute(sql, val)
+        # 1. Lưu đề thi vào bảng de_thi_iig
+        sql_insert_test = "INSERT INTO de_thi_iig (ten_de, nguon_goc, nam_phat_hanh, dap_an_json) VALUES (%s, %s, %s, %s)"
+        val_test = (request.test_name, 'ai_generated', nam_phat_hanh, request.dap_an_json)
+        cursor.execute(sql_insert_test, val_test)
         id_de_thi_moi = cursor.lastrowid
         
-        # Ghi log nếu có admin_id
+        # 2. Ghi log vào bảng nhat_ky_hoat_dong
         if admin_id > 0:
             chi_tiet_log = f"Đã duyệt và lưu đề AI: '{request.test_name}' (ID: #{id_de_thi_moi})"
-            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'TAO_DE_AI', %s)", (admin_id, chi_tiet_log))
+            sql_insert_log = "INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'TAO_DE_AI', %s)"
+            cursor.execute(sql_insert_log, (admin_id, chi_tiet_log))
 
         db.commit() 
         db.close()

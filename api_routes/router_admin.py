@@ -99,7 +99,7 @@ async def get_ai_generated_tests():
                 d.ten_de, 
                 d.nam_phat_hanh, 
                 d.nguon_goc,
-                COALESCE(t.ho_ten, 'Không rõ') AS nguoi_tao,
+                COALESCE(t.ten_dang_nhap, 'Không rõ') AS nguoi_tao,
                 COALESCE(n.thoi_gian, d.ngay_tao) AS ngay_tao
             FROM de_thi_iig d
             LEFT JOIN nhat_ky_hoat_dong n 

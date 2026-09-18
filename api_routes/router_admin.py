@@ -105,6 +105,41 @@ async def get_ai_generated_tests():
     except Exception as e:
         return {"status": "error", "message": str(e)}
     
+# =============================================================
+# ===   API XEM CHI TIẾT ĐỀ THI AI                          ===
+# =============================================================
+@router.get("/get-ai-test-detail/{test_id}")
+async def get_ai_test_detail_api(test_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, ten_de, dap_an_json FROM de_thi_iig WHERE id = %s", (test_id,))
+        test = cursor.fetchone()
+        db.close()
+        
+        if test:
+            return {"status": "success", "data": test}
+        else:
+            return {"status": "error", "message": "Không tìm thấy đề thi"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# =============================================================
+# ===   API XÓA ĐỀ THI AI                                   ===
+# =============================================================
+@router.delete("/delete-ai-test/{test_id}")
+async def delete_ai_test_api(test_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        cursor.execute("DELETE FROM de_thi_iig WHERE id = %s", (test_id,))
+        db.commit()
+        db.close()
+        
+        return {"status": "success", "message": "Đã xóa thành công"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 
 # ==========================================
 # API ADMIN: LẤY CHI TIẾT 1 ĐỀ IIG ĐỂ XEM TRƯỚC

@@ -681,7 +681,7 @@ async def generate_reading_56_stream_api(test_name: str = Form(...)):
                     for attempt in range(3):
                         try:
                             response = client.chat.completions.create(
-                                model="Qwen/Qwen2.5-72B-Instruct",
+                                model="Qwen/Qwen3-32B",
                                 messages=[
                                     {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
                                     {"role": "user", "content": system_prompt}
@@ -766,7 +766,7 @@ async def generate_reading_7_stream_api(test_name: str = Form(...)):
                 for attempt in range(3):
                     try:
                         response = client.chat.completions.create(
-                            model="Qwen/Qwen2.5-72B-Instruct",
+                            model="Qwen/Qwen3-32B",
                             messages=[
                                 {"role": "system", "content": "You are a professional TOEIC test generator. Output valid JSON only."},
                                 {"role": "user", "content": system_prompt}

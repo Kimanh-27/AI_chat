@@ -639,20 +639,26 @@ async def get_student_dashboard_stats(id_hoc_sinh: int):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# API HỌC SINH CHỈ ĐƯỢC PHÉP LẤY DANH SÁCH (READ-ONLY)
+# API HỌC SINH LẤY DANH SÁCH TÀI LIỆU (READ-ONLY)
 @router.get("/get-all-grammar-docs")
 async def get_all_grammar_docs():
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        # Lấy toàn bộ dữ liệu (không cần id_giao_vien vì tài liệu là dùng chung cho toàn hệ thống)
-        cursor.execute("SELECT id, tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, ngay_tao FROM tai_lieu_hoc ORDER BY id DESC")
+        # Nối bảng để lấy thông tin người biên soạn
+        sql = """
+            SELECT t.*, tk.vai_tro as vai_tro_tao, tk.ten_dang_nhap as ten_nguoi_tao 
+            FROM tai_lieu_hoc t 
+            LEFT JOIN tai_khoan tk ON t.id_nguoi_tao = tk.id 
+            ORDER BY t.id DESC
+        """
+        cursor.execute(sql)
         docs = cursor.fetchall()
         db.close()
         return {"status": "success", "data": docs}
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
+        
 @router.post("/log-doc-view")
 async def log_doc_view(req: LogViewRequest):
     try:

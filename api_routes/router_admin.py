@@ -882,12 +882,20 @@ async def extract_document_ai(file: UploadFile = File(...)):
         traceback.print_exc()
         return {"status": "error", "message": f"Lỗi Backend: {str(e)}"}
 
+# 1. API LẤY DANH SÁCH TÀI LIỆU (KÈM THÔNG TIN NGƯỜI TẠO)
 @router.get("/get-all-grammar-docs")
 async def get_all_grammar_docs():
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        cursor.execute("SELECT id, tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, ngay_tao FROM tai_lieu_hoc ORDER BY id DESC")
+        # ĐÃ SỬA: Nối qua tk.id thay vì tk.id_tai_khoan
+        sql = """
+            SELECT t.*, tk.vai_tro as vai_tro_tao, tk.ten_dang_nhap as ten_nguoi_tao 
+            FROM tai_lieu_hoc t 
+            LEFT JOIN tai_khoan tk ON t.id_nguoi_tao = tk.id 
+            ORDER BY t.id DESC
+        """
+        cursor.execute(sql)
         docs = cursor.fetchall()
         db.close()
         return {"status": "success", "data": docs}
@@ -907,16 +915,30 @@ async def get_grammar_doc(doc_id: int):
         return {"status": "error", "message": str(e)}
 
 @router.post("/save-grammar-doc")
-async def save_grammar_doc(doc: TaiLieuHocModel):
+async def save_grammar_doc(doc: TaiLieuHocModel): # Hoặc TaiLieuHocModel tùy bạn đang khai báo tên gì
     try:
         db = get_db_connection()
         cursor = db.cursor()
+
+        # KIỂM TRA TRÙNG TÊN TÀI LIỆU
+        if doc.id:
+            # Nếu đang Sửa: Bỏ qua tên của chính tài liệu này
+            cursor.execute("SELECT id FROM tai_lieu_hoc WHERE tieu_de = %s AND id != %s", (doc.tieu_de, doc.id))
+        else:
+            # Nếu Thêm mới: Kiểm tra toàn bộ
+            cursor.execute("SELECT id FROM tai_lieu_hoc WHERE tieu_de = %s", (doc.tieu_de,))
+            
+        if cursor.fetchone():
+            db.close()
+            return {"status": "error", "message": "Tên tài liệu này đã tồn tại trong kho. Vui lòng chọn tên khác!"}
+
+        # NẾU KHÔNG TRÙNG -> TIẾN HÀNH LƯU
         if doc.id:
             sql = "UPDATE tai_lieu_hoc SET tieu_de=%s, loai_tai_lieu=%s, tags=%s, noi_dung=%s, file_goc=%s WHERE id=%s"
             cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.id))
         else:
-            sql = "INSERT INTO tai_lieu_hoc (tieu_de, loai_tai_lieu, tags, noi_dung, file_goc) VALUES (%s, %s, %s, %s, %s)"
-            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc))
+            sql = "INSERT INTO tai_lieu_hoc (tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, id_nguoi_tao) VALUES (%s, %s, %s, %s, %s, %s)"
+            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.id_nguoi_tao))
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã lưu tài liệu thành công!"}

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, Query
 from PIL import Image
 from database import get_db_connection
 from fastapi import APIRouter,Form
@@ -888,12 +888,20 @@ async def get_teacher_dashboard_stats(id_giao_vien: int):
 # =========================================================================
 from schemas import TaiLieuHocModel
 
+# SỬA: Lấy toàn bộ tài liệu và thông tin người tạo (Giống hệt Admin)
 @router.get("/get-all-grammar-docs")
 async def get_all_grammar_docs():
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        cursor.execute("SELECT id, tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, ngay_tao FROM tai_lieu_hoc ORDER BY id DESC")
+        # Nối bảng tai_khoan để lấy vai_tro và id_nguoi_tao
+        sql = """
+            SELECT t.*, tk.vai_tro as vai_tro_tao, tk.ten_dang_nhap as ten_nguoi_tao 
+            FROM tai_lieu_hoc t 
+            LEFT JOIN tai_khoan tk ON t.id_nguoi_tao = tk.id 
+            ORDER BY t.id DESC
+        """
+        cursor.execute(sql)
         docs = cursor.fetchall()
         db.close()
         return {"status": "success", "data": docs}
@@ -917,18 +925,30 @@ async def save_grammar_doc(doc: TaiLieuHocModel):
     try:
         db = get_db_connection()
         cursor = db.cursor()
+
+        # KIỂM TRA TRÙNG TÊN TÀI LIỆU
+        if doc.id:
+            cursor.execute("SELECT id FROM tai_lieu_hoc WHERE tieu_de = %s AND id != %s", (doc.tieu_de, doc.id))
+        else:
+            cursor.execute("SELECT id FROM tai_lieu_hoc WHERE tieu_de = %s", (doc.tieu_de,))
+            
+        if cursor.fetchone():
+            db.close()
+            return {"status": "error", "message": "Tên tài liệu này đã tồn tại trong kho. Vui lòng chọn tên khác!"}
+
+        # LƯU DỮ LIỆU
         if doc.id:
             sql = "UPDATE tai_lieu_hoc SET tieu_de=%s, loai_tai_lieu=%s, tags=%s, noi_dung=%s, file_goc=%s WHERE id=%s"
             cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.id))
         else:
-            sql = "INSERT INTO tai_lieu_hoc (tieu_de, loai_tai_lieu, tags, noi_dung, file_goc) VALUES (%s, %s, %s, %s, %s)"
-            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc))
+            sql = "INSERT INTO tai_lieu_hoc (tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, id_nguoi_tao) VALUES (%s, %s, %s, %s, %s, %s)"
+            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.id_nguoi_tao))
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã lưu tài liệu thành công!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
+        
 @router.post("/delete-grammar-doc/{doc_id}")
 async def delete_grammar_doc(doc_id: int):
     try:

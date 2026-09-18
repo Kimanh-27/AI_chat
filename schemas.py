@@ -148,3 +148,4 @@ class TaiLieuHocModel(BaseModel):
     tags: str          
     noi_dung: str
     file_goc: Optional[str] = None
+    id_nguoi_tao: int = None

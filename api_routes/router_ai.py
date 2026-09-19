@@ -18,6 +18,15 @@ TOEIC_DYNAMIC_TOPICS = [
     "Chương trình khuyến mãi tại siêu thị", "Quy định an toàn lao động", "Đăng ký thẻ hội viên phòng gym",
     "Gọi thợ sửa ống nước", "Kiểm toán tài chính cuối năm", "Mua sắm thiết bị văn phòng"
 ]
+VOICES = {
+    "NARRATOR": "en-US-JennyNeural",       # Nữ Mỹ (Người dẫn chương trình)
+    "M": "en-US-ChristopherNeural",        # Nam Mỹ 1
+    "M1": "en-GB-RyanNeural",              # Nam Anh
+    "M2": "en-AU-WilliamNeural",           # Nam Úc
+    "W": "en-US-AriaNeural",               # Nữ Mỹ 1
+    "W1": "en-GB-SoniaNeural",             # Nữ Anh
+    "W2": "en-AU-NatashaNeural"            # Nữ Úc
+}
 
 from huggingface_hub import InferenceClient
 from fastapi.responses import StreamingResponse,FileResponse
@@ -936,45 +945,93 @@ async def download_ai_audio(test_id: int):
         pause_3s = "\n... ... ... ...\n" 
         pause_5s = "\n... ... ... ... ... ... ...\n"
 
-        transcript = f"Welcome to the Nova TOEIC test. {test['ten_de']}. \n\n"
+        blocks = [] # Mảng chứa kịch bản đã chia theo giọng đọc
+        audio_q_count = 1 # Bộ đếm câu hỏi
+
+        p12_text = f"Welcome to the Nova TOEIC test. {test['ten_de']}. \n\n"
 
         # PART 1: 4 Đáp án
         if 'part_1' in data:
-            transcript += "Part 1. Directions: For each question, you will listen to four statements about a picture. Choose the one that best describes what you see.\n"
-            for idx, q in enumerate(data['part_1']):
-                transcript += f"Number {idx + 1}. Look at the picture.\n"
+            p12_text += "Part 1. Directions: For each question, you will listen to four statements about a picture. Choose the one that best describes what you see.\n"
+            for q in data['part_1']:
+                p12_text += f"Number {audio_q_count}. Look at the picture.\n"
                 for opt in ['a', 'b', 'c', 'd']:
-                    if q.get(f'dap_an_{opt}'): transcript += f"({opt.upper()}) {q[f'dap_an_{opt}']}.\n"
-                # Chèn nghỉ 3s giữa các câu hỏi
-                transcript += pause_3s
+                    if q.get(f'dap_an_{opt}'): p12_text += f"({opt.upper()}) {q[f'dap_an_{opt}']}.\n"
+                p12_text += pause_3s
+                audio_q_count += 1
 
         # PART 2: Câu hỏi + 3 Đáp án
         if 'part_2' in data:
-            transcript += "Part 2. Directions: You will hear a question or statement and three responses. Choose the best response.\n"
-            for idx, q in enumerate(data['part_2']):
-                transcript += f"Next question.\n"
-                if q.get('cau_hoi'): transcript += f"{q['cau_hoi']}\n"
+            p12_text += "Part 2. Directions: You will hear a question or statement and three responses. Choose the best response.\n"
+            for q in data['part_2']:
+                p12_text += f"Number {audio_q_count}.\n"
+                if q.get('cau_hoi'): p12_text += f"{q['cau_hoi']}\n"
                 for opt in ['a', 'b', 'c']:
-                    if q.get(f'dap_an_{opt}'): transcript += f"({opt.upper()}) {q[f'dap_an_{opt}']}.\n"
-                # Chèn nghỉ 4s giữa các câu hỏi
-                transcript += pause_3s
+                    if q.get(f'dap_an_{opt}'): p12_text += f"({opt.upper()}) {q[f'dap_an_{opt}']}.\n"
+                p12_text += pause_3s
+                audio_q_count += 1
 
-        # PART 3 & 4: CHỈ ĐỌC TRANSCRIPT 
+        blocks.append(("NARRATOR", p12_text))
+
+        # PART 3 & 4: CHỈ ĐỌC TRANSCRIPT
         for part in ['part_3', 'part_4']:
             if part in data:
-                transcript += f"{part.replace('_', ' ').title()}. Directions: You will hear some conversations or talks.\n"
+                part_name = "conversation" if part == 'part_3' else "talk"
+                blocks.append(("NARRATOR", f"{part.replace('_', ' ').title()}. Directions: You will hear some {part_name}s.\n"))
+                
                 for item in data[part]:
-                    transcript += "Questions refer to the following audio.\n"
-                    if item.get('doan_van'): transcript += f"{item['doan_van']}\n"
+                    num_qs = len(item.get('danh_sach_cau_hoi', []))
+                    if num_qs > 0:
+                        end_q = audio_q_count + num_qs - 1
+                        intro_text = f"Questions {audio_q_count} through {end_q} refer to the following {part_name}.\n"
+                        audio_q_count += num_qs
+                    else:
+                        intro_text = f"Questions refer to the following {part_name}.\n"
+                        
+                    blocks.append(("NARRATOR", intro_text))
                     
-                    # Chèn nghỉ 5s 
-                    transcript += pause_5s
+                    doan_van = item.get('doan_van', '')
+                    if part == 'part_3':
+                        # Tách đoạn hội thoại theo nhân vật (M, W, M1, W2...)
+                        current_speaker = "M" 
+                        for line in doan_van.split('\n'):
+                            line = line.strip()
+                            if not line: continue
+                            
+                            # Nhận diện thẻ tên
+                            match = re.match(r'^(M|W|M1|M2|W1|W2|MAN|WOMAN)\s*:\s*(.*)', line, re.IGNORECASE)
+                            if match:
+                                current_speaker = match.group(1).upper().replace("MAN", "M").replace("WOMAN", "W")
+                                text = match.group(2)
+                                blocks.append((current_speaker, text + "\n"))
+                            else:
+                                blocks.append((current_speaker, line + "\n"))
+                    else:
+                        # Part 4 (Talk) do 1 người đọc (Mặc định Nam Anh)
+                        blocks.append(("M1", doan_van + "\n"))
+                    
+                    # Chèn nghỉ 5s để tô đáp án
+                    blocks.append(("NARRATOR", pause_5s))
 
-        # Dùng giọng JennyNeural và hạ tốc độ đọc 
-        communicate = edge_tts.Communicate(transcript, "en-US-JennyNeural", rate="-15%")
-        await communicate.save(audio_path)
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
 
-        # Trả thẳng file về trình duyệt
+        with open(audio_path, "wb") as final_file:
+            for i, (speaker_code, text) in enumerate(blocks):
+                if not text.strip(): continue
+                
+                voice_id = VOICES.get(speaker_code, VOICES["NARRATOR"])
+                tmp_path = f"uploads/tmp/temp_chunk_{i}.mp3"
+                
+                communicate = edge_tts.Communicate(text, voice_id, rate="-15%")
+                await communicate.save(tmp_path)
+                
+                with open(tmp_path, "rb") as tmp_file:
+                    final_file.write(tmp_file.read())
+                    
+                os.remove(tmp_path) 
+
+        # Trả file về trình duyệt
         return FileResponse(path=audio_path, media_type='audio/mpeg', filename=f"{safe_name}_Audio.mp3")
     except Exception as e:
         return {"status": "error", "message": str(e)}

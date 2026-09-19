@@ -7,6 +7,7 @@ import asyncio
 import os
 import datetime
 import random
+import edge_tts
 
 TOEIC_DYNAMIC_TOPICS = [
     "Phỏng vấn ứng viên mới", "Lỗi phần mềm máy tính", "Đặt tiệc tại nhà hàng", "Thay đổi lịch trình bay", 
@@ -26,6 +27,7 @@ from typing import List
 from database import get_db_connection
 from schemas import QuestionRequest, ExamRequest, PracticeQuestion, UpdateQuestionModel, SaveAITestRequest
 from prompts import TOEIC_CONFIG
+from xhtml2pdf import pisa
 
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
@@ -873,6 +875,125 @@ async def get_task_status_api(task_id: str):
         return {"status": "success", "data": response_data}
         
     return {"status": "success", "data": task}
+
+# =============================================================
+# ===   API SINH FILE PDF VÀ AUDIO TỪ ĐỀ AI                 ===
+# =============================================================
+@router.post("/generate-ai-media/{test_id}")
+async def generate_ai_media(test_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, ten_de, dap_an_json, file_pdf, file_audio FROM de_thi_iig WHERE id = %s", (test_id,))
+        test = cursor.fetchone()
+        
+        if not test or not test['dap_an_json']:
+            return {"status": "error", "message": "Không tìm thấy dữ liệu đề thi"}
+
+        data = json.loads(test['dap_an_json'])
+        safe_name = "".join([c if c.isalnum() else "_" for c in test['ten_de']])
+        
+        # Đảm bảo thư mục uploads tồn tại
+        os.makedirs("uploads/pdf", exist_ok=True)
+        os.makedirs("uploads/audio", exist_ok=True)
+
+        pdf_path = f"uploads/pdf/{safe_name}_{test_id}.pdf"
+        audio_path = f"uploads/audio/{safe_name}_{test_id}.mp3"
+
+        # ---------------------------------------------------------
+        # 1. TẠO FILE AUDIO MP3 (Sử dụng Edge-TTS giọng bản ngữ)
+        # ---------------------------------------------------------
+        transcript = f"Welcome to the Nova TOEIC test. {test['ten_de']}. \n"
+        
+        # Hàm đọc câu hỏi và 4 đáp án
+        def build_q_a(q, q_num):
+            txt = f"Question {q_num}. {q.get('cau_hoi', '')}. \n"
+            if q.get('dap_an_a'): txt += f"(A) {q['dap_an_a']}. \n"
+            if q.get('dap_an_b'): txt += f"(B) {q['dap_an_b']}. \n"
+            if q.get('dap_an_c'): txt += f"(C) {q['dap_an_c']}. \n"
+            if q.get('dap_an_d'): txt += f"(D) {q['dap_an_d']}. \n"
+            return txt
+
+        q_count = 1
+        for part in ['part_1', 'part_2', 'part_3', 'part_4']:
+            if part in data:
+                transcript += f"Listening Test, {part.replace('_', ' ').title()}. \n"
+                for item in data[part]:
+                    if 'danh_sach_cau_hoi' in item:
+                        transcript += f"Questions refer to the following talk: {item.get('doan_van', '')}. \n"
+                        for sq in item['danh_sach_cau_hoi']:
+                            transcript += build_q_a(sq, q_count)
+                            q_count += 1
+                    else:
+                        transcript += build_q_a(item, q_count)
+                        q_count += 1
+                        
+        # Gọi Edge-TTS tạo file âm thanh (Giọng nam Mỹ: en-US-ChristopherNeural hoặc nữ Mỹ: en-US-JennyNeural)
+        communicate = edge_tts.Communicate(transcript, "en-US-JennyNeural", rate="-5%")
+        await communicate.save(audio_path)
+
+        # ---------------------------------------------------------
+        # 2. TẠO FILE PDF BẰNG xhtml2pdf
+        # ---------------------------------------------------------
+        html_content = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Helvetica, sans-serif; font-size: 14px; color: #333; }}
+                h1 {{ text-align: center; color: #1e3a8a; }}
+                h2 {{ color: #4f46e5; border-bottom: 1px solid #ccc; padding-bottom: 5px; }}
+                .question {{ font-weight: bold; margin-top: 15px; margin-bottom: 5px; }}
+                .passage {{ background-color: #f8fafc; padding: 10px; font-style: italic; border-left: 3px solid #3b82f6; margin-bottom: 10px; }}
+                ul {{ list-style-type: none; padding-left: 0; margin-top: 0; }}
+                li {{ margin-bottom: 3px; }}
+            </style>
+        </head>
+        <body>
+            <h1>{test['ten_de']}</h1>
+        """
+        
+        pdf_q_count = 1
+        for part in ['part_1', 'part_2', 'part_3', 'part_4', 'part_5', 'part_6', 'part_7']:
+            if part in data:
+                html_content += f"<h2>{part.replace('_', ' ').upper()}</h2>"
+                for item in data[part]:
+                    if item.get('doan_van'):
+                        html_content += f"<div class='passage'>{item['doan_van']}</div>"
+                    
+                    if 'danh_sach_cau_hoi' in item:
+                        for sq in item['danh_sach_cau_hoi']:
+                            html_content += f"<div class='question'>Q{pdf_q_count}: {sq.get('cau_hoi','')}</div><ul>"
+                            for opt in ['a', 'b', 'c', 'd']:
+                                if sq.get(f'dap_an_{opt}'):
+                                    html_content += f"<li><b>({opt.upper()})</b> {sq[f'dap_an_{opt}']}</li>"
+                            html_content += "</ul>"
+                            pdf_q_count += 1
+                    else:
+                        html_content += f"<div class='question'>Q{pdf_q_count}: {item.get('cau_hoi','')}</div><ul>"
+                        for opt in ['a', 'b', 'c', 'd']:
+                            if item.get(f'dap_an_{opt}'):
+                                html_content += f"<li><b>({opt.upper()})</b> {item[f'dap_an_{opt}']}</li>"
+                        html_content += "</ul>"
+                        pdf_q_count += 1
+                        
+        html_content += "</body></html>"
+        
+        # Ghi file PDF
+        with open(pdf_path, "w+b") as pdf_file:
+            pisa.CreatePDF(html_content, dest=pdf_file)
+
+        # ---------------------------------------------------------
+        # 3. CẬP NHẬT CƠ SỞ DỮ LIỆU
+        # ---------------------------------------------------------
+        sql_update = "UPDATE de_thi_iig SET file_pdf = %s, file_audio = %s WHERE id = %s"
+        cursor.execute(sql_update, (pdf_path, audio_path, test_id))
+        db.commit()
+        db.close()
+
+        return {"status": "success", "message": "Đã tạo thành công Audio và PDF", "pdf": pdf_path, "audio": audio_path}
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 #=============================================================
 #===       LƯU BỘ CÂU HỎI AI SINH          ==========

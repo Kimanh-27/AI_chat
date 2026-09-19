@@ -971,7 +971,7 @@ async def download_ai_audio(test_id: int):
                     transcript += pause_5s
 
         # Dùng giọng JennyNeural và hạ tốc độ đọc 
-        communicate = edge_tts.Communicate(transcript, "en-US-JennyNeural", rate="-10%")
+        communicate = edge_tts.Communicate(transcript, "en-US-JennyNeural", rate="-15%")
         await communicate.save(audio_path)
 
         # Trả thẳng file về trình duyệt

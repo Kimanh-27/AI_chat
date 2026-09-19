@@ -99,6 +99,8 @@ async def get_ai_generated_tests():
                 d.ten_de, 
                 d.nam_phat_hanh, 
                 d.nguon_goc,
+                d.file_pdf,
+                d.file_audio,
                 COALESCE(t.ten_dang_nhap, 'Không rõ') AS nguoi_tao,
                 COALESCE(n.thoi_gian, d.ngay_tao) AS ngay_tao
             FROM de_thi_iig d
@@ -129,7 +131,7 @@ async def get_ai_test_detail_api(test_id: int):
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        cursor.execute("SELECT id, ten_de, dap_an_json FROM de_thi_iig WHERE id = %s", (test_id,))
+        cursor.execute("SELECT id, ten_de, dap_an_json, file_pdf, file_audio FROM de_thi_iig WHERE id = %s", (test_id,))
         test = cursor.fetchone()
         db.close()
         

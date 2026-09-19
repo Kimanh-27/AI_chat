@@ -1418,14 +1418,14 @@ Ví dụ: [{"tu": "Family (n)", "phien_am": "/ˈfæm.əl.i/", "nghia": "Gia đì
 
         # 3. GỌI MODEL 
         if image_data_url:
-            model_name = "Qwen/Qwen2-VL-7B-Instruct"
+            model_name = "Qwen/Qwen3-VL-30B-A3B-Instruct"
             content = []
             if extracted_text:
                 content.append({"type": "text", "text": f"Kèm theo chú thích: {extracted_text}"})
             content.append({"type": "image_url", "image_url": {"url": image_data_url}})
             messages.append({"role": "user", "content": content})
         else:
-            model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
+            model_name = "Qwen/Qwen3-14B"
             messages.append({"role": "user", "content": f"Dữ liệu cần trích xuất:\n{extracted_text}"})
 
         response = client.chat.completions.create(

@@ -1377,10 +1377,6 @@ async def extract_vocabulary_media(file: UploadFile = File(None), text: str = Fo
         if not file and not text:
             return {"status": "error", "message": "Vui lòng tải lên file hoặc nhập văn bản."}
 
-        # Khởi tạo client Hugging Face (Sếp nhớ thay YOUR_HF_TOKEN bằng token thật trong tài khoản HF của sếp)
-        hf_token = os.getenv("HF_TOKEN", "YOUR_HF_TOKEN")
-        client = InferenceClient(api_key=hf_token)
-
         extracted_text = text if text else ""
         image_data_url = None
 
@@ -1389,7 +1385,6 @@ async def extract_vocabulary_media(file: UploadFile = File(None), text: str = Fo
             file_bytes = await file.read()
             filename = file.filename.lower()
 
-            # Xử lý PDF
             if filename.endswith(".pdf"):
                 with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
                     for page in pdf.pages:
@@ -1397,13 +1392,11 @@ async def extract_vocabulary_media(file: UploadFile = File(None), text: str = Fo
                         if page_text:
                             extracted_text += page_text + "\n"
             
-            # Xử lý Word (DOCX)
             elif filename.endswith(".docx"):
                 doc = docx.Document(io.BytesIO(file_bytes))
                 for para in doc.paragraphs:
                     extracted_text += para.text + "\n"
             
-            # Xử lý Hình Ảnh
             elif filename.endswith((".png", ".jpg", ".jpeg", ".webp")):
                 img = Image.open(io.BytesIO(file_bytes))
                 img_byte_arr = io.BytesIO()
@@ -1414,7 +1407,7 @@ async def extract_vocabulary_media(file: UploadFile = File(None), text: str = Fo
             else:
                 return {"status": "error", "message": "Định dạng file không được hỗ trợ (chỉ nhận PDF, DOCX, Ảnh)."}
 
-        # 2. XÂY DỰNG KỊCH BẢN PROMPT
+        # 2.PROMPT
         system_prompt = """Bạn là chuyên gia trích xuất dữ liệu. Hãy trích xuất TOÀN BỘ danh sách từ vựng từ dữ liệu được cung cấp.
 TRẢ VỀ ĐÚNG ĐỊNH DẠNG MẢNG JSON, bao gồm các key: "tu", "phien_am", "nghia", "vi_du".
 Bám sát chính xác dữ liệu gốc. Nếu không có phiên âm hoặc ví dụ cụ thể, hãy để chuỗi rỗng "".
@@ -1423,9 +1416,8 @@ Ví dụ: [{"tu": "Family (n)", "phien_am": "/ˈfæm.əl.i/", "nghia": "Gia đì
 
         messages = [{"role": "system", "content": system_prompt}]
 
-        # 3. GỌI MODEL TƯƠNG ỨNG TỪ HUGGING FACE
+        # 3. GỌI MODEL 
         if image_data_url:
-            # Model Vision (Xử lý ảnh) cực ngon của Qwen
             model_name = "Qwen/Qwen2-VL-7B-Instruct"
             content = []
             if extracted_text:
@@ -1433,11 +1425,9 @@ Ví dụ: [{"tu": "Family (n)", "phien_am": "/ˈfæm.əl.i/", "nghia": "Gia đì
             content.append({"type": "image_url", "image_url": {"url": image_data_url}})
             messages.append({"role": "user", "content": content})
         else:
-            # Model Text siêu tốc của Llama 3 (Xử lý PDF, DOCX, Text)
             model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
             messages.append({"role": "user", "content": f"Dữ liệu cần trích xuất:\n{extracted_text}"})
 
-        # Gửi request lên Hugging Face Inference API
         response = client.chat.completions.create(
             model=model_name,
             messages=messages,

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, HTTPException
 from database import get_db_connection
-from schemas import HistoryData, IIGSubmitData
+from schemas import HistoryData, IIGSubmitData, StudentLogRequest
 from pydantic import BaseModel
 import json
 import re
@@ -15,6 +15,26 @@ class LogViewRequest(BaseModel):
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 router = APIRouter()
 
+def write_system_log(cursor, id_tai_khoan, action_desc):
+    """
+    Hàm tiện ích tự động tra cứu thông tin tài khoản và ghi log
+    Lưu ý: Bạn phải gọi db.commit() sau khi dùng hàm này ở route chính.
+    """
+    try:
+        # 1. Tìm thông tin người dùng từ DB
+        cursor.execute("SELECT ten_dang_nhap, vai_tro FROM tai_khoan WHERE id = %s", (id_tai_khoan,))
+        user = cursor.fetchone()
+        
+        if user:
+            # Tương thích với cả cursor tuple và dictionary
+            ten = user['ten_dang_nhap'] if isinstance(user, dict) else user[0]
+            vai_tro = user['vai_tro'] if isinstance(user, dict) else user[1]
+            
+            # 2. Ghi vào bảng nhật ký
+            sql_log = "INSERT INTO lich_su_xem_tai_lieu (id_tai_khoan, ten_tai_khoan, vai_tro, hanh_dong) VALUES (%s, %s, %s, %s)"
+            cursor.execute(sql_log, (id_tai_khoan, ten, vai_tro, action_desc))
+    except Exception as e:
+        print("LỖI GHI LOG:", e)
 
 #=============================================================
 #===      HỌC SINH NHẬN BÀI TẬP ĐƯỢC GIAO     ================
@@ -660,14 +680,25 @@ async def get_all_grammar_docs():
         return {"status": "error", "message": str(e)}
         
 @router.post("/log-doc-view")
-async def log_doc_view(req: LogViewRequest):
+async def log_student_view(req: StudentLogRequest):
     try:
         db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
-            "INSERT INTO lich_su_xem_tai_lieu (id_hoc_sinh, id_tai_lieu) VALUES (%s, %s)", 
-            (req.id_hoc_sinh, req.id_tai_lieu)
-        )
+        cursor = db.cursor(dictionary=True)
+        
+        # Lấy tên tài liệu để ghi log cho đẹp
+        cursor.execute("SELECT tieu_de FROM tai_lieu_hoc WHERE id = %s", (req.id_tai_lieu,))
+        doc = cursor.fetchone()
+        tieu_de = doc['tieu_de'] if doc else f"ID {req.id_tai_lieu}"
+
+        # Xác định câu văn ghi log dựa vào trạng thái Frontend gửi lên
+        if req.trang_thai == "start":
+            hanh_dong = f"đã truy cập (chưa hoàn thành bài tập) tài liệu: {tieu_de}"
+        else:
+            hanh_dong = f"đã truy cập và hoàn thành quiz tài liệu: {tieu_de}"
+
+        # Ghi vào nhật ký hệ thống
+        write_system_log(cursor, req.id_hoc_sinh, hanh_dong)
+        
         db.commit()
         db.close()
         return {"status": "success"}

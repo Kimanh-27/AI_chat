@@ -149,3 +149,12 @@ class TaiLieuHocModel(BaseModel):
     noi_dung: str
     file_goc: Optional[str] = None
     id_nguoi_tao: int = None
+    bai_tap_json: Optional[str] = None
+class GenerateQuizRequest(BaseModel):
+    noi_dung: str
+    so_luong: str = "2-3"
+
+class StudentLogRequest(BaseModel):
+    id_hoc_sinh: int
+    id_tai_lieu: int
+    trang_thai: str # Nhận 2 giá trị: "start" hoặc "completed"

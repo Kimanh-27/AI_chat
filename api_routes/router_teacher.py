@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Form, Query
 from PIL import Image
 from database import get_db_connection
 from fastapi import APIRouter,Form
-from schemas import HomeworkData,SaveAndAssignRequest,ThongBaoLopModel,DeleteHomeworkRequest,ChuDeModel,TuVungModel,BulkTuVungModel, TaiLieuHocModel
+from schemas import HomeworkData,SaveAndAssignRequest,ThongBaoLopModel,DeleteHomeworkRequest,ChuDeModel,TuVungModel,BulkTuVungModel, TaiLieuHocModel,GenerateQuizRequest
 import json
 import os
 import uuid 
@@ -13,12 +13,38 @@ from prompts import TOEIC_CONFIG
 import google.generativeai as genai
 import pymupdf as fitz
 import io
+from pydantic import BaseModel
+from huggingface_hub import AsyncInferenceClient
 
 router = APIRouter()
 # HÀM LOG NHANH DÙNG CHUNG BÊN TRONG FILE router_teacher.py
+hf_token = os.getenv("HUGGINGFACE_API_KEY", "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") 
+hf_client = AsyncInferenceClient(api_key=hf_token)
+MODEL_ID = "Qwen/Qwen3-32B"
 def log_teacher_activity(cursor, id_gv, action, detail=""):
     sql = "INSERT INTO lich_su_hoat_dong_gv (id_giao_vien, hanh_dong, chi_tiet) VALUES (%s, %s, %s)"
     cursor.execute(sql, (id_gv, action, detail))
+def write_system_log(cursor, id_tai_khoan, action_desc):
+    """
+    Hàm tiện ích tự động tra cứu thông tin tài khoản và ghi log
+    Lưu ý: Bạn phải gọi db.commit() sau khi dùng hàm này ở route chính.
+    """
+    try:
+        # 1. Tìm thông tin người dùng từ DB
+        cursor.execute("SELECT ten_dang_nhap, vai_tro FROM tai_khoan WHERE id = %s", (id_tai_khoan,))
+        user = cursor.fetchone()
+        
+        if user:
+            # Tương thích với cả cursor tuple và dictionary
+            ten = user['ten_dang_nhap'] if isinstance(user, dict) else user[0]
+            vai_tro = user['vai_tro'] if isinstance(user, dict) else user[1]
+            
+            # 2. Ghi vào bảng nhật ký
+            sql_log = "INSERT INTO lich_su_xem_tai_lieu (id_tai_khoan, ten_tai_khoan, vai_tro, hanh_dong) VALUES (%s, %s, %s, %s)"
+            cursor.execute(sql_log, (id_tai_khoan, ten, vai_tro, action_desc))
+    except Exception as e:
+        print("LỖI GHI LOG:", e)
+
 #=============================================================
 #===      GIÁO VIÊN THỐNG KÊ PHÂN TÍCH THEO LỚP     ==========
 #=============================================================
@@ -826,7 +852,7 @@ Ví dụ: [{"tu": "Family (n)", "phien_am": "/ˈfæm.əl.i/", "nghia": "Gia đì
             contents.append(text)
 
         model = genai.GenerativeModel(
-            'gemini-3.6-flash',
+            'gemini-3.8-flash',
             generation_config={"response_mime_type": "application/json"}
         )
         
@@ -921,12 +947,11 @@ async def get_grammar_doc(doc_id: int):
         return {"status": "error", "message": str(e)}
 
 @router.post("/save-grammar-doc")
-async def save_grammar_doc(doc: TaiLieuHocModel):
+async def save_grammar_doc(doc: TaiLieuHocModel): 
     try:
         db = get_db_connection()
         cursor = db.cursor()
 
-        # KIỂM TRA TRÙNG TÊN TÀI LIỆU
         if doc.id:
             cursor.execute("SELECT id FROM tai_lieu_hoc WHERE tieu_de = %s AND id != %s", (doc.tieu_de, doc.id))
         else:
@@ -936,25 +961,42 @@ async def save_grammar_doc(doc: TaiLieuHocModel):
             db.close()
             return {"status": "error", "message": "Tên tài liệu này đã tồn tại trong kho. Vui lòng chọn tên khác!"}
 
-        # LƯU DỮ LIỆU
         if doc.id:
-            sql = "UPDATE tai_lieu_hoc SET tieu_de=%s, loai_tai_lieu=%s, tags=%s, noi_dung=%s, file_goc=%s WHERE id=%s"
-            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.id))
+            sql = "UPDATE tai_lieu_hoc SET tieu_de=%s, loai_tai_lieu=%s, tags=%s, noi_dung=%s, file_goc=%s, bai_tap_json=%s WHERE id=%s"
+            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.bai_tap_json, doc.id))
+            hieu_lenh = "Đã sửa"
         else:
-            sql = "INSERT INTO tai_lieu_hoc (tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, id_nguoi_tao) VALUES (%s, %s, %s, %s, %s, %s)"
-            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.id_nguoi_tao))
+            sql = "INSERT INTO tai_lieu_hoc (tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, id_nguoi_tao, bai_tap_json) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.id_nguoi_tao, doc.bai_tap_json))
+            hieu_lenh = "Đã thêm"
+            
+        # BỔ SUNG LOG VÀO ĐÂY
+        hanh_dong = f"{hieu_lenh} tài liệu: {doc.tieu_de}"
+        write_system_log(cursor, doc.id_nguoi_tao, hanh_dong)
+            
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã lưu tài liệu thành công!"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
-        
+        return {"status": "error", "message": str(e)}@router.post("/delete-grammar-doc/{doc_id}")
+
 @router.post("/delete-grammar-doc/{doc_id}")
 async def delete_grammar_doc(doc_id: int):
     try:
         db = get_db_connection()
-        cursor = db.cursor()
+        cursor = db.cursor(dictionary=True)
+        
+        # Lấy thông tin tài liệu trước khi xóa
+        cursor.execute("SELECT tieu_de, id_nguoi_tao FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+        doc_info = cursor.fetchone()
+        
         cursor.execute("DELETE FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+        
+        # BỔ SUNG LOG VÀO ĐÂY
+        if doc_info:
+            hanh_dong = f"Đã xóa tài liệu: '{doc_info['tieu_de']}'"
+            write_system_log(cursor, doc_info['id_nguoi_tao'], hanh_dong)
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã xóa tài liệu!"}
@@ -1001,7 +1043,7 @@ async def extract_document_ai(file: UploadFile = File(...)):
                             raw_html += f'<div style="text-align:center; margin:15px 0;"><img src="{img_url}" style="max-width:100%; border-radius:8px;"></div>\n'
             doc.close()
         elif file_ext in ['.png', '.jpg', '.jpeg']:
-            model = genai.GenerativeModel('gemini-3.6-flash')
+            model = genai.GenerativeModel('gemini-3.8-flash')
             with open(saved_filepath, "rb") as f:
                 image_parts = [{"mime_type": file.content_type, "data": f.read()}]
             response = await model.generate_content_async([
@@ -1013,7 +1055,7 @@ async def extract_document_ai(file: UploadFile = File(...)):
 
         if raw_html:
             prompt = f"Cấu trúc lại HTML thô thành bài giảng đẹp mắt (Dùng <h3>, <ul>, <li>). GIỮ NGUYÊN 100% các thẻ <img src=\"...\">. Chỉ trả về HTML sạch.\n[HTML THÔ]\n{raw_html}"
-            model = genai.GenerativeModel('gemini-3.6-flash')
+            model = genai.GenerativeModel('gemini-3.8-flash')
             response = await model.generate_content_async(prompt)
             return {"status": "success", "data": response.text.replace("```html", "").replace("```", "").strip(), "file_goc": file_goc_url}
 
@@ -1059,5 +1101,121 @@ async def get_doc_view_history(id_lop: int):
         history = cursor.fetchall()
         db.close()
         return {"status": "success", "data": history}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# API TẠO CÂU HỎI TRẮC NGHIỆM MỚI DÙNG CHUNG AI (HUGGINGFACE)
+@router.post("/generate-doc-quiz")
+async def generate_doc_quiz(req: GenerateQuizRequest):
+    try:
+        clean_text = re.sub(r'<[^>]+>', ' ', req.noi_dung).strip()
+        clean_text = clean_text[:4000] 
+        
+        if not clean_text:
+            return {"status": "error", "message": "Nội dung bài giảng đang trống."}
+
+        messages = [
+            {
+                "role": "system",
+                "content": "Bạn là chuyên gia ra đề thi trắc nghiệm Tiếng Anh. YÊU CẦU TỐI THƯỢNG: Chỉ trả về một mảng JSON duy nhất. Không sinh ra bất kỳ văn bản, thẻ markdown (```json), lời giải thích bên ngoài hay lời chào nào khác."
+            },
+            {
+                "role": "user",
+                "content": f"""Nhiệm vụ: Phân tích đoạn văn bản bài học dưới đây. Tự động sinh ra từ {req.so_luong} câu trắc nghiệm tùy thuộc vào độ dài kiến thức.
+
+TIÊU CHÍ CHẤT LƯỢNG:
+1. Nội dung câu hỏi BẮT BUỘC phải nằm trong văn bản cung cấp.
+2. Có 4 đáp án (1 đúng, 3 sai).
+3. LUẬT THÉP CHỐNG LỖI JSON: TUYỆT ĐỐI KHÔNG sử dụng dấu ngoặc kép (") bên trong nội dung câu hỏi, đáp án và giải thích. Nếu cần trích dẫn từ vựng, BẮT BUỘC dùng dấu nháy đơn (').
+- Ví dụ SAI: "explanation": "Từ "go" là động từ"
+- Ví dụ ĐÚNG: "explanation": "Từ 'go' là động từ"
+
+Cấu trúc JSON BẮT BUỘC (Không thừa không thiếu):
+[
+  {{
+    "question": "Nội dung câu hỏi?",
+    "options": ["A. Đáp án 1", "B. Đáp án 2", "C. Đáp án 3", "D. Đáp án 4"],
+    "correctIndex": 0,
+    "explanation": "Vì trong bài ghi rõ rằng..."
+  }}
+]
+
+VĂN BẢN BÀI HỌC CẦN RA ĐỀ:
+{clean_text}"""
+            }
+        ]        
+        response = await hf_client.chat_completion(
+            model=MODEL_ID,
+            messages=messages,
+            max_tokens=1000, # Tăng max_tokens một chút để đề phòng sinh 3 câu dài
+            temperature=0.15 # Tăng nhiệt độ lên 1 chút để AI có độ mượt khi tự quyết định số câu
+        )
+        
+        raw_text = response.choices[0].message.content.strip()
+        raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+        
+        start_idx = raw_text.find('[')
+        end_idx = raw_text.rfind(']')
+        
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            clean_json_string = raw_text[start_idx:end_idx+1]
+            clean_json_string = clean_json_string.replace('\n', ' ').replace('\r', '')
+            
+            # --- BỘ LỌC TỰ CHỮA LÀNH JSON (AUTO-HEALER) ---
+            # Quét và biến các dấu ngoặc kép "lưu manh" thành dấu nháy đơn '
+            chars = list(clean_json_string)
+            for i, c in enumerate(chars):
+                if c == '"':
+                    # Tìm ký tự có nghĩa liền trước
+                    prev_char = ''
+                    for j in range(i-1, -1, -1):
+                        if chars[j].strip():
+                            prev_char = chars[j]
+                            break
+                            
+                    # Tìm ký tự có nghĩa liền sau
+                    next_char = ''
+                    for j in range(i+1, len(chars)):
+                        if chars[j].strip():
+                            next_char = chars[j]
+                            break
+                    
+                    # Nếu ngoặc kép KHÔNG ĐỨNG CẠNH các dấu phẩy, hai chấm hay ngoặc nhọn của JSON
+                    # => Chắc chắn là ngoặc kép rác do AI tự chế -> Đổi thành nháy đơn
+                    if prev_char not in '{[:,[' and next_char not in '}]:,]':
+                        chars[i] = "'"
+            
+            clean_json_string = "".join(chars)
+            # ---------------------------------------------
+            
+            try:
+                quiz_data = json.loads(clean_json_string)
+                return {"status": "success", "data": quiz_data}
+            except Exception as parse_err:
+                print("LỖI PARSE JSON:", str(parse_err))
+                print("CHUỖI BỊ LỖI:", clean_json_string)
+                return {"status": "error", "message": "AI sinh ra dữ liệu có chứa ký tự lạ làm hỏng JSON."}
+        else:
+            print("LỖI KHÔNG TÌM THẤY DẤU NGOẶC MẢNG:", raw_text)
+            return {"status": "error", "message": "Model không thể định dạng JSON hợp lệ."}
+    except Exception as e:
+        print("LỖI HỆ THỐNG KHI GENERATE QUIZ:", str(e))
+        return {"status": "error", "message": str(e)}
+
+@router.get("/document-view-logs")
+async def get_document_view_logs():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        # --- ĐÃ ĐỔI TÊN BẢNG ---
+        cursor.execute("SELECT * FROM lich_su_xem_tai_lieu ORDER BY thoi_gian DESC LIMIT 100")
+        logs = cursor.fetchall()
+        db.close()
+        
+        for log in logs:
+            log['thoi_gian'] = log['thoi_gian'].strftime("%d/%m/%Y %H:%M:%S")
+            
+        return {"status": "success", "data": logs}
     except Exception as e:
         return {"status": "error", "message": str(e)}

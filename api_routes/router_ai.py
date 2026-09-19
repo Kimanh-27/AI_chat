@@ -962,7 +962,7 @@ async def download_ai_audio(test_id: int):
                     transcript += "Questions refer to the following audio.\n"
                     if item.get('doan_van'): transcript += f"{item['doan_van']}\n\n"
 
-        communicate = edge_tts.Communicate(transcript, "en-US-JennyNeural", rate="-5%")
+        communicate = edge_tts.Communicate(transcript, "en-US-JennyNeural", rate="-20%")
         await communicate.save(audio_path)
 
         # Trả thẳng file về trình duyệt

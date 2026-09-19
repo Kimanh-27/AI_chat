@@ -913,65 +913,83 @@ async def save_practice_questions(questions: List[PracticeQuestion]):
         print(f"Lỗi lưu câu hỏi: {e}")
         return {"status": "error", "message": "Lỗi Database: " + str(e)}
 
-# =============================================================
-# ===   API SINH FILE PDF VÀ AUDIO TỪ ĐỀ AI                 ===
-# =============================================================
-@router.post("/generate-ai-media/{test_id}")
-async def generate_ai_media(test_id: int):
+# =========================================================
+# 1. API TẢI AUDIO ON-DEMAND (CHỈ ĐỌC ĐỀ - KHÔNG ĐÁP ÁN)
+# =========================================================
+@router.get("/download-ai-audio/{test_id}")
+async def download_ai_audio(test_id: int):
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        cursor.execute("SELECT id, ten_de, dap_an_json, file_pdf, file_audio FROM de_thi_iig WHERE id = %s", (test_id,))
+        cursor.execute("SELECT ten_de, dap_an_json FROM de_thi_iig WHERE id = %s", (test_id,))
         test = cursor.fetchone()
-        
+        db.close()
+
         if not test or not test['dap_an_json']:
-            return {"status": "error", "message": "Không tìm thấy dữ liệu đề thi"}
+            return {"status": "error", "message": "Không có dữ liệu JSON"}
 
         data = json.loads(test['dap_an_json'])
         safe_name = "".join([c if c.isalnum() else "_" for c in test['ten_de']])
+        os.makedirs("uploads/tmp", exist_ok=True)
+        audio_path = f"uploads/tmp/{safe_name}_{test_id}.mp3"
+
+        transcript = f"Welcome to the Nova TOEIC test. {test['ten_de']}. \n\n"
         
-        # Đảm bảo thư mục uploads tồn tại
-        os.makedirs("uploads/pdf", exist_ok=True)
-        os.makedirs("uploads/audio", exist_ok=True)
+        # PART 1: 4 Đáp án
+        if 'part_1' in data:
+            transcript += "Part 1. Directions: For each question, you will listen to four statements about a picture. Choose the one that best describes what you see.\n"
+            for idx, q in enumerate(data['part_1']):
+                transcript += f"Number {idx + 1}. Look at the picture.\n"
+                for opt in ['a', 'b', 'c', 'd']:
+                    if q.get(f'dap_an_{opt}'): transcript += f"({opt.upper()}) {q[f'dap_an_{opt}']}.\n"
+                transcript += "\n"
 
-        pdf_path = f"uploads/pdf/{safe_name}_{test_id}.pdf"
-        audio_path = f"uploads/audio/{safe_name}_{test_id}.mp3"
+        # PART 2: Câu hỏi + 3 Đáp án
+        if 'part_2' in data:
+            transcript += "Part 2. Directions: You will hear a question or statement and three responses. Choose the best response.\n"
+            for idx, q in enumerate(data['part_2']):
+                transcript += f"Next question.\n"
+                if q.get('cau_hoi'): transcript += f"{q['cau_hoi']}\n"
+                for opt in ['a', 'b', 'c']:
+                    if q.get(f'dap_an_{opt}'): transcript += f"({opt.upper()}) {q[f'dap_an_{opt}']}.\n"
+                transcript += "\n"
 
-        # ---------------------------------------------------------
-        # 1. TẠO FILE AUDIO MP3 (Sử dụng Edge-TTS giọng bản ngữ)
-        # ---------------------------------------------------------
-        transcript = f"Welcome to the Nova TOEIC test. {test['ten_de']}. \n"
-        
-        # Hàm đọc câu hỏi và 4 đáp án
-        def build_q_a(q, q_num):
-            txt = f"Question {q_num}. {q.get('cau_hoi', '')}. \n"
-            if q.get('dap_an_a'): txt += f"(A) {q['dap_an_a']}. \n"
-            if q.get('dap_an_b'): txt += f"(B) {q['dap_an_b']}. \n"
-            if q.get('dap_an_c'): txt += f"(C) {q['dap_an_c']}. \n"
-            if q.get('dap_an_d'): txt += f"(D) {q['dap_an_d']}. \n"
-            return txt
-
-        q_count = 1
-        for part in ['part_1', 'part_2', 'part_3', 'part_4']:
+        # PART 3 & 4: CHỈ ĐỌC TRANSCRIPT (Tuyệt đối không đọc câu hỏi/đáp án)
+        for part in ['part_3', 'part_4']:
             if part in data:
-                transcript += f"Listening Test, {part.replace('_', ' ').title()}. \n"
+                transcript += f"{part.replace('_', ' ').title()}. Directions: You will hear some conversations or talks.\n"
                 for item in data[part]:
-                    if 'danh_sach_cau_hoi' in item:
-                        transcript += f"Questions refer to the following talk: {item.get('doan_van', '')}. \n"
-                        for sq in item['danh_sach_cau_hoi']:
-                            transcript += build_q_a(sq, q_count)
-                            q_count += 1
-                    else:
-                        transcript += build_q_a(item, q_count)
-                        q_count += 1
-                        
-        # Gọi Edge-TTS tạo file âm thanh (Giọng nam Mỹ: en-US-ChristopherNeural hoặc nữ Mỹ: en-US-JennyNeural)
+                    transcript += "Questions refer to the following audio.\n"
+                    if item.get('doan_van'): transcript += f"{item['doan_van']}\n\n"
+
         communicate = edge_tts.Communicate(transcript, "en-US-JennyNeural", rate="-5%")
         await communicate.save(audio_path)
 
-        # ---------------------------------------------------------
-        # 2. TẠO FILE PDF BẰNG xhtml2pdf
-        # ---------------------------------------------------------
+        # Trả thẳng file về trình duyệt
+        return FileResponse(path=audio_path, media_type='audio/mpeg', filename=f"{safe_name}_Audio.mp3")
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# =========================================================
+# 2. API TẢI PDF ON-DEMAND (CHUẨN FORM IIG)
+# =========================================================
+@router.get("/download-ai-pdf/{test_id}")
+async def download_ai_pdf(test_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT ten_de, dap_an_json FROM de_thi_iig WHERE id = %s", (test_id,))
+        test = cursor.fetchone()
+        db.close()
+
+        if not test or not test['dap_an_json']:
+            return {"status": "error", "message": "Không có dữ liệu JSON"}
+
+        data = json.loads(test['dap_an_json'])
+        safe_name = "".join([c if c.isalnum() else "_" for c in test['ten_de']])
+        os.makedirs("uploads/tmp", exist_ok=True)
+        pdf_path = f"uploads/tmp/{safe_name}_{test_id}.pdf"
+
         html_content = f"""
         <html>
         <head>
@@ -996,79 +1014,46 @@ async def generate_ai_media(test_id: int):
             if part in data:
                 html_content += f"<h2>{part.replace('_', ' ').upper()}</h2>"
                 for item in data[part]:
-                    
-                    # --- PART 1: Chỉ Ảnh và A, B, C, D ---
                     if part == 'part_1':
                         if item.get('hinh_anh'):
-                            img_url = item['hinh_anh']
-                            if str(img_url).startswith('/'):
-                                img_url = f"https://ai-chat-zsg4.onrender.com{img_url}"
+                            img_url = str(item['hinh_anh'])
+                            if img_url.startswith('/'): img_url = f"https://ai-chat-zsg4.onrender.com{img_url}"
                             html_content += f"<div class='img-center'><img src='{img_url}'></div>"
-                        html_content += f"<div class='question'>Question {pdf_q_count}.</div>"
-                        html_content += "<ul><li>(A)</li><li>(B)</li><li>(C)</li><li>(D)</li></ul>"
+                        html_content += f"<div class='question'>Question {pdf_q_count}.</div><ul><li>(A)</li><li>(B)</li><li>(C)</li><li>(D)</li></ul>"
                         pdf_q_count += 1
-
-                    # --- PART 2: Không Câu hỏi, Chỉ A, B, C ---
                     elif part == 'part_2':
-                        html_content += f"<div class='question'>Question {pdf_q_count}.</div>"
-                        html_content += "<ul><li>(A)</li><li>(B)</li><li>(C)</li></ul>"
+                        html_content += f"<div class='question'>Question {pdf_q_count}.</div><ul><li>(A)</li><li>(B)</li><li>(C)</li></ul>"
                         pdf_q_count += 1
-
-                    # --- PART 3 & 4: Giấu Đoạn văn (Transcript), Chỉ hiện Câu hỏi + Các đáp án ---
                     elif part in ['part_3', 'part_4']:
                         if 'danh_sach_cau_hoi' in item:
                             for sq in item['danh_sach_cau_hoi']:
                                 html_content += f"<div class='question'>Question {pdf_q_count}: {sq.get('cau_hoi','')}</div><ul>"
                                 for opt in ['a', 'b', 'c', 'd']:
-                                    if sq.get(f'dap_an_{opt}'):
-                                        html_content += f"<li><b>({opt.upper()})</b> {sq[f'dap_an_{opt}']}</li>"
+                                    if sq.get(f'dap_an_{opt}'): html_content += f"<li><b>({opt.upper()})</b> {sq[f'dap_an_{opt}']}</li>"
                                 html_content += "</ul>"
                                 pdf_q_count += 1
                         else:
                             html_content += f"<div class='question'>Question {pdf_q_count}: {item.get('cau_hoi','')}</div><ul>"
                             for opt in ['a', 'b', 'c', 'd']:
-                                if item.get(f'dap_an_{opt}'):
-                                    html_content += f"<li><b>({opt.upper()})</b> {item[f'dap_an_{opt}']}</li>"
+                                if item.get(f'dap_an_{opt}'): html_content += f"<li><b>({opt.upper()})</b> {item[f'dap_an_{opt}']}</li>"
                             html_content += "</ul>"
                             pdf_q_count += 1
-
-                    # --- PART 5, 6, 7: Hiện đầy đủ Đoạn văn, Câu hỏi, Đáp án ---
                     else:
                         if item.get('doan_van'):
-                            doan_van_html = item['doan_van'].replace('\n', '<br>')
-                            html_content += f"<div class='passage'>{doan_van_html}</div>"
-                        
-                        if 'danh_sach_cau_hoi' in item:
-                            for sq in item['danh_sach_cau_hoi']:
-                                html_content += f"<div class='question'>Question {pdf_q_count}: {sq.get('cau_hoi','')}</div><ul>"
-                                for opt in ['a', 'b', 'c', 'd']:
-                                    if sq.get(f'dap_an_{opt}'):
-                                        html_content += f"<li><b>({opt.upper()})</b> {sq[f'dap_an_{opt}']}</li>"
-                                html_content += "</ul>"
-                                pdf_q_count += 1
-                        else:
-                            html_content += f"<div class='question'>Question {pdf_q_count}: {item.get('cau_hoi','')}</div><ul>"
+                            html_content += f"<div class='passage'>{item['doan_van'].replace(chr(10), '<br>')}</div>"
+                        questions_list = item.get('danh_sach_cau_hoi', [item])
+                        for sq in questions_list:
+                            html_content += f"<div class='question'>Question {pdf_q_count}: {sq.get('cau_hoi','')}</div><ul>"
                             for opt in ['a', 'b', 'c', 'd']:
-                                if item.get(f'dap_an_{opt}'):
-                                    html_content += f"<li><b>({opt.upper()})</b> {item[f'dap_an_{opt}']}</li>"
+                                if sq.get(f'dap_an_{opt}'): html_content += f"<li><b>({opt.upper()})</b> {sq[f'dap_an_{opt}']}</li>"
                             html_content += "</ul>"
                             pdf_q_count += 1
                             
         html_content += "</body></html>"
-        
-        with open(pdf_path, "w+b") as pdf_file:
-            pisa.CreatePDF(html_content, dest=pdf_file)
+        with open(pdf_path, "w+b") as pdf_file: pisa.CreatePDF(html_content, dest=pdf_file)
 
-        # ---------------------------------------------------------
-        # 3. CẬP NHẬT CƠ SỞ DỮ LIỆU
-        # ---------------------------------------------------------
-        sql_update = "UPDATE de_thi_iig SET file_pdf = %s, file_audio = %s WHERE id = %s"
-        cursor.execute(sql_update, (pdf_path, audio_path, test_id))
-        db.commit()
-        db.close()
-
-        return {"status": "success", "message": "Đã tạo thành công Audio và PDF", "pdf": pdf_path, "audio": audio_path}
-
+        # Trả thẳng file về trình duyệt
+        return FileResponse(path=pdf_path, media_type='application/pdf', filename=f"{safe_name}_DeThi.pdf")
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

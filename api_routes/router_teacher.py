@@ -1,5 +1,4 @@
 from fastapi import APIRouter, UploadFile, File, Form
-from PIL import Image
 from database import get_db_connection
 from fastapi import APIRouter,Form
 from schemas import HomeworkData,SaveAndAssignRequest,ThongBaoLopModel,DeleteHomeworkRequest,ChuDeModel,TuVungModel,BulkTuVungModel,TaiLieuHocModel
@@ -801,47 +800,6 @@ async def bulk_add_vocab(req: BulkTuVungModel):
         conn.commit()
         conn.close()
         return {"status": "success", "message": f"Đã nhập thành công {success_count} từ vựng từ Nova!"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@router.post("/extract-vocab-media")
-async def extract_vocabulary_media(file: UploadFile = File(None), text: str = Form(None)):
-    try:
-        if not file and not text:
-            return {"status": "error", "message": "Vui lòng tải lên ảnh hoặc nhập văn bản."}
-
-        contents = []
-        system_prompt = """Bạn là chuyên gia trích xuất dữ liệu. Hãy đọc hình ảnh hoặc dữ liệu bảng được cung cấp và trích xuất TOÀN BỘ danh sách từ vựng có trong đó.
-TRẢ VỀ ĐÚNG ĐỊNH DẠNG MẢNG JSON, bao gồm các key: "tu", "phien_am", "nghia", "vi_du".
-Bám sát chính xác dữ liệu gốc, không tự bịa thêm từ, không bỏ sót từ nào. Giữ nguyên định dạng gốc của từ (bao gồm cả loại từ như (n), (v) nếu có). Nếu trong ảnh/dữ liệu không có phiên âm hoặc ví dụ cụ thể, hãy để chuỗi rỗng "".
-Ví dụ: [{"tu": "Family (n)", "phien_am": "/ˈfæm.əl.i/", "nghia": "Gia đình", "vi_du": ""}]"""
-        
-        contents.append(system_prompt)
-
-        if file:
-            image_data = await file.read()
-            image = Image.open(io.BytesIO(image_data))
-            contents.append(image)
-        
-        if text:
-            contents.append(text)
-
-        model = genai.GenerativeModel(
-            'gemini-2.5-flash',
-            generation_config={"response_mime_type": "application/json"}
-        )
-        
-        response = await model.generate_content_async(contents)
-        raw_output = response.text.strip()
-
-        match = re.search(r'(\[.*\])', raw_output, re.DOTALL)
-        if match:
-            clean_json = match.group(1)
-            parsed_data = json.loads(clean_json)
-            return {"status": "success", "data": parsed_data}
-        else:
-            return {"status": "error", "message": "Nova không thể tạo cấu trúc JSON từ dữ liệu cung cấp."}
-
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

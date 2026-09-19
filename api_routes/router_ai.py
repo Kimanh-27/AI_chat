@@ -20,7 +20,7 @@ TOEIC_DYNAMIC_TOPICS = [
 ]
 
 from huggingface_hub import InferenceClient
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse,FileResponse
 
 from dotenv import load_dotenv
 from typing import List
@@ -876,6 +876,40 @@ async def get_task_status_api(task_id: str):
         
     return {"status": "success", "data": task}
 
+
+#=============================================================
+#===       LƯU BỘ CÂU HỎI AI SINH          ==========
+#=============================================================
+@router.post("/save-practice-questions")
+async def save_practice_questions(questions: List[PracticeQuestion]):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        
+        sql = """INSERT INTO ngan_hang_cau_hoi 
+                 (id_giao_vien, id_dang_bai, part, hinh_anh, doan_van, cau_hoi, dap_an_a, dap_an_b, dap_an_c, dap_an_d, dap_an_dung, giai_thich) 
+                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+        
+        for q in questions:
+            val = (q.id_giao_vien, q.id_dang_bai, q.part, q.hinh_anh, q.doan_van_text, q.cau_hoi, 
+                   q.dap_an_a, q.dap_an_b, q.dap_an_c, q.dap_an_d, q.dap_an_dung, q.giai_thich)
+            cursor.execute(sql, val)
+
+        if questions:
+            id_gv = questions[0].id_giao_vien
+            chi_tiet_log = f"Đã duyệt và lưu thành công {len(questions)} câu hỏi ôn luyện mới"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_CAU_HOI', %s)", (id_gv, chi_tiet_log))
+
+        db.commit()
+        cursor.close()
+        db.close()
+        
+        return {"status": "success", "message": f"Đã lưu thành công {len(questions)} câu vào Ngân hàng Ôน luyện!"}
+        
+    except Exception as e:
+        print(f"Lỗi lưu câu hỏi: {e}")
+        return {"status": "error", "message": "Lỗi Database: " + str(e)}
+
 # =============================================================
 # ===   API SINH FILE PDF VÀ AUDIO TỪ ĐỀ AI                 ===
 # =============================================================
@@ -995,38 +1029,16 @@ async def generate_ai_media(test_id: int):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-#=============================================================
-#===       LƯU BỘ CÂU HỎI AI SINH          ==========
-#=============================================================
-@router.post("/save-practice-questions")
-async def save_practice_questions(questions: List[PracticeQuestion]):
-    try:
-        db = get_db_connection()
-        cursor = db.cursor()
-        
-        sql = """INSERT INTO ngan_hang_cau_hoi 
-                 (id_giao_vien, id_dang_bai, part, hinh_anh, doan_van, cau_hoi, dap_an_a, dap_an_b, dap_an_c, dap_an_d, dap_an_dung, giai_thich) 
-                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
-        
-        for q in questions:
-            val = (q.id_giao_vien, q.id_dang_bai, q.part, q.hinh_anh, q.doan_van_text, q.cau_hoi, 
-                   q.dap_an_a, q.dap_an_b, q.dap_an_c, q.dap_an_d, q.dap_an_dung, q.giai_thich)
-            cursor.execute(sql, val)
 
-        if questions:
-            id_gv = questions[0].id_giao_vien
-            chi_tiet_log = f"Đã duyệt và lưu thành công {len(questions)} câu hỏi ôn luyện mới"
-            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_CAU_HOI', %s)", (id_gv, chi_tiet_log))
-
-        db.commit()
-        cursor.close()
-        db.close()
-        
-        return {"status": "success", "message": f"Đã lưu thành công {len(questions)} câu vào Ngân hàng Ôน luyện!"}
-        
-    except Exception as e:
-        print(f"Lỗi lưu câu hỏi: {e}")
-        return {"status": "error", "message": "Lỗi Database: " + str(e)}
+# =============================================================
+# ===   API ĐỌC VÀ TRẢ FILE AUDIO / PDF VỀ TRÌNH DUYỆT      ===
+# =============================================================
+@router.get("/get-media")
+async def get_media_file(file_path: str):
+    # Kiểm tra xem file có tồn tại trên máy chủ không
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return {"status": "error", "message": "File không tồn tại hoặc đã bị xóa"}
 
 
 @router.post("/delete-question/{q_id}")

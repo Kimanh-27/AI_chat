@@ -9,6 +9,18 @@ import datetime
 import random
 import edge_tts
 
+from huggingface_hub import InferenceClient
+from fastapi.responses import StreamingResponse,FileResponse
+
+from dotenv import load_dotenv
+from typing import List
+from database import get_db_connection
+from schemas import QuestionRequest, ExamRequest, PracticeQuestion, UpdateQuestionModel, SaveAITestRequest,PracticeAudioRequest
+from prompts import TOEIC_CONFIG
+from xhtml2pdf import pisa
+
+from langchain_core.messages import HumanMessage, AIMessage
+
 TOEIC_DYNAMIC_TOPICS = [
     "Phỏng vấn ứng viên mới", "Lỗi phần mềm máy tính", "Đặt tiệc tại nhà hàng", "Thay đổi lịch trình bay", 
     "Hỏng hóc máy móc trong nhà máy", "Thanh toán hóa đơn trễ hạn", "Khảo sát ý kiến khách hàng", 
@@ -27,21 +39,6 @@ VOICES = {
     "W1": "en-GB-SoniaNeural",             # Nữ Anh
     "W2": "en-AU-NatashaNeural"            # Nữ Úc
 }
-
-from huggingface_hub import InferenceClient
-from fastapi.responses import StreamingResponse,FileResponse
-
-from dotenv import load_dotenv
-from typing import List
-from database import get_db_connection
-from schemas import QuestionRequest, ExamRequest, PracticeQuestion, UpdateQuestionModel, SaveAITestRequest
-from prompts import TOEIC_CONFIG
-from xhtml2pdf import pisa
-
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage
 
 load_dotenv()
 
@@ -889,39 +886,6 @@ async def get_task_status_api(task_id: str):
     return {"status": "success", "data": task}
 
 
-#=============================================================
-#===       LƯU BỘ CÂU HỎI AI SINH          ==========
-#=============================================================
-@router.post("/save-practice-questions")
-async def save_practice_questions(questions: List[PracticeQuestion]):
-    try:
-        db = get_db_connection()
-        cursor = db.cursor()
-        
-        sql = """INSERT INTO ngan_hang_cau_hoi 
-                 (id_giao_vien, id_dang_bai, part, hinh_anh, doan_van, cau_hoi, dap_an_a, dap_an_b, dap_an_c, dap_an_d, dap_an_dung, giai_thich) 
-                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
-        
-        for q in questions:
-            val = (q.id_giao_vien, q.id_dang_bai, q.part, q.hinh_anh, q.doan_van_text, q.cau_hoi, 
-                   q.dap_an_a, q.dap_an_b, q.dap_an_c, q.dap_an_d, q.dap_an_dung, q.giai_thich)
-            cursor.execute(sql, val)
-
-        if questions:
-            id_gv = questions[0].id_giao_vien
-            chi_tiet_log = f"Đã duyệt và lưu thành công {len(questions)} câu hỏi ôn luyện mới"
-            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_CAU_HOI', %s)", (id_gv, chi_tiet_log))
-
-        db.commit()
-        cursor.close()
-        db.close()
-        
-        return {"status": "success", "message": f"Đã lưu thành công {len(questions)} câu vào Ngân hàng Ôน luyện!"}
-        
-    except Exception as e:
-        print(f"Lỗi lưu câu hỏi: {e}")
-        return {"status": "error", "message": "Lỗi Database: " + str(e)}
-
 # =========================================================
 # 1. API TẢI AUDIO ON-DEMAND (CHỈ ĐỌC ĐỀ - KHÔNG ĐÁP ÁN)
 # =========================================================
@@ -1135,6 +1099,40 @@ async def get_media_file(file_path: str):
     return {"status": "error", "message": "File không tồn tại hoặc đã bị xóa"}
 
 
+#=============================================================
+#===       LƯU BỘ CÂU HỎI AI SINH THEO PART         ==========
+#=============================================================
+@router.post("/save-practice-questions")
+async def save_practice_questions(questions: List[PracticeQuestion]):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        
+        sql = """INSERT INTO ngan_hang_cau_hoi 
+                 (id_giao_vien, id_dang_bai, part, hinh_anh, doan_van, cau_hoi, dap_an_a, dap_an_b, dap_an_c, dap_an_d, dap_an_dung, giai_thich) 
+                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+        
+        for q in questions:
+            val = (q.id_giao_vien, q.id_dang_bai, q.part, q.hinh_anh, q.doan_van_text, q.cau_hoi, 
+                   q.dap_an_a, q.dap_an_b, q.dap_an_c, q.dap_an_d, q.dap_an_dung, q.giai_thich)
+            cursor.execute(sql, val)
+
+        if questions:
+            id_gv = questions[0].id_giao_vien
+            chi_tiet_log = f"Đã duyệt và lưu thành công {len(questions)} câu hỏi ôn luyện mới"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'teacher', 'QUAN_LY_CAU_HOI', %s)", (id_gv, chi_tiet_log))
+
+        db.commit()
+        cursor.close()
+        db.close()
+        
+        return {"status": "success", "message": f"Đã lưu thành công {len(questions)} câu vào Ngân hàng Ôน luyện!"}
+        
+    except Exception as e:
+        print(f"Lỗi lưu câu hỏi: {e}")
+        return {"status": "error", "message": "Lỗi Database: " + str(e)}
+
+
 @router.post("/delete-question/{q_id}")
 async def delete_question(q_id: int):
     try:
@@ -1186,6 +1184,82 @@ async def update_question(q_id: int, q: UpdateQuestionModel):
         print("LỖI SỬA CÂU HỎI:", e)
         return {"status": "error", "message": str(e)}
 
+
+@router.post("/generate-practice-audio")
+async def generate_practice_audio(data: PracticeAudioRequest):
+    try:
+        safe_name = f"practice_{uuid.uuid4().hex[:8]}"
+        os.makedirs("uploads/tmp", exist_ok=True)
+        audio_path = f"uploads/tmp/{safe_name}.mp3"
+
+        blocks = []
+        pause_3s = "\n... ... ... ...\n" 
+        pause_5s = "\n... ... ... ... ... ... ...\n"
+        
+        part = data.part
+        qs = data.questions
+
+        p12_text = ""
+        # 1. Kịch bản Part 1 & 2
+        if part in ['part_1', 'part_2']:
+            for idx, q in enumerate(qs):
+                p12_text += f"Number {idx + 1}.\n"
+                if q.get('cau_hoi'): p12_text += f"{q['cau_hoi']}\n"
+                for opt in ['a', 'b', 'c', 'd']:
+                    if q.get(f'dap_an_{opt}'): p12_text += f"({opt.upper()}) {q[f'dap_an_{opt}']}.\n"
+                p12_text += pause_3s
+            blocks.append(("NARRATOR", p12_text))
+
+        # 2. Kịch bản Part 3 & 4 (Đa giọng đọc + Đọc câu hỏi như code JS cũ của sếp)
+        elif part in ['part_3', 'part_4']:
+            part_name = "conversation" if part == 'part_3' else "talk"
+            for idx, item in enumerate(qs):
+                blocks.append(("NARRATOR", f"Listen to the following {part_name}.\n"))
+                
+                doan_van = item.get('doan_van', '')
+                if part == 'part_3':
+                    current_speaker = "M" 
+                    for line in doan_van.split('\n'):
+                        line = line.strip()
+                        if not line: continue
+                        match = re.match(r'^(M|W|M1|M2|W1|W2|MAN|WOMAN)\s*:\s*(.*)', line, re.IGNORECASE)
+                        if match:
+                            current_speaker = match.group(1).upper().replace("MAN", "M").replace("WOMAN", "W")
+                            text = match.group(2)
+                            blocks.append((current_speaker, text + "\n"))
+                        else:
+                            blocks.append((current_speaker, line + "\n"))
+                else:
+                    blocks.append(("M1", doan_van + "\n"))
+                
+                blocks.append(("NARRATOR", pause_5s))
+                
+                # Trong phần ôn luyện, học sinh cần nghe đọc từng câu hỏi (giống logic cũ sếp viết)
+                danh_sach = item.get('danh_sach_cau_hoi', [])
+                for sq_idx, sq in enumerate(danh_sach):
+                    blocks.append(("M1", f"Question {sq_idx + 1}. {sq.get('cau_hoi', '')}\n"))
+                    blocks.append(("NARRATOR", pause_3s))
+
+        # 3. Tiến hành thu âm và nối file
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+
+        with open(audio_path, "wb") as final_file:
+            for i, (speaker_code, text) in enumerate(blocks):
+                if not text.strip(): continue
+                voice_id = VOICES.get(speaker_code, VOICES["NARRATOR"])
+                tmp_path = f"uploads/tmp/temp_chunk_{i}.mp3"
+                
+                communicate = edge_tts.Communicate(text, voice_id, rate="-15%")
+                await communicate.save(tmp_path)
+                
+                with open(tmp_path, "rb") as tmp_file:
+                    final_file.write(tmp_file.read())
+                os.remove(tmp_path)
+
+        return FileResponse(path=audio_path, media_type='audio/mpeg', filename=f"{safe_name}.mp3")
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 def run_llm_background(task_id: str, request: ExamRequest, chat_memory: list):
     try:

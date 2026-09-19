@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Any
 
 
 class PracticeQuestion(BaseModel):
@@ -157,3 +157,7 @@ class LogViewRequest(BaseModel):
 class SaveAITestRequest(BaseModel):
     test_name: str
     dap_an_json: str
+
+class PracticeAudioRequest(BaseModel):
+    part: str
+    questions: List[Any]

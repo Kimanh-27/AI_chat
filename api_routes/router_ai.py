@@ -933,8 +933,8 @@ async def download_ai_audio(test_id: int):
         os.makedirs("uploads/tmp", exist_ok=True)
         audio_path = f"uploads/tmp/{safe_name}_{test_id}.mp3"
 
-        pause_2s = "\n... ... ...\n" 
-        pause_5s = "\n... ... ... ... ... ...\n"
+        pause_3s = "\n... ... ... ...\n" 
+        pause_5s = "\n... ... ... ... ... ... ...\n"
 
         transcript = f"Welcome to the Nova TOEIC test. {test['ten_de']}. \n\n"
 
@@ -945,8 +945,8 @@ async def download_ai_audio(test_id: int):
                 transcript += f"Number {idx + 1}. Look at the picture.\n"
                 for opt in ['a', 'b', 'c', 'd']:
                     if q.get(f'dap_an_{opt}'): transcript += f"({opt.upper()}) {q[f'dap_an_{opt}']}.\n"
-                # Chèn nghỉ 2s giữa các câu hỏi
-                transcript += pause_2s
+                # Chèn nghỉ 3s giữa các câu hỏi
+                transcript += pause_3s
 
         # PART 2: Câu hỏi + 3 Đáp án
         if 'part_2' in data:
@@ -956,8 +956,8 @@ async def download_ai_audio(test_id: int):
                 if q.get('cau_hoi'): transcript += f"{q['cau_hoi']}\n"
                 for opt in ['a', 'b', 'c']:
                     if q.get(f'dap_an_{opt}'): transcript += f"({opt.upper()}) {q[f'dap_an_{opt}']}.\n"
-                # Chèn nghỉ 2s giữa các câu hỏi
-                transcript += pause_2s
+                # Chèn nghỉ 4s giữa các câu hỏi
+                transcript += pause_3s
 
         # PART 3 & 4: CHỈ ĐỌC TRANSCRIPT 
         for part in ['part_3', 'part_4']:

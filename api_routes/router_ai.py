@@ -933,8 +933,11 @@ async def download_ai_audio(test_id: int):
         os.makedirs("uploads/tmp", exist_ok=True)
         audio_path = f"uploads/tmp/{safe_name}_{test_id}.mp3"
 
+        pause_2s = "\n... ... ...\n" 
+        pause_5s = "\n... ... ... ... ... ...\n"
+
         transcript = f"Welcome to the Nova TOEIC test. {test['ten_de']}. \n\n"
-        
+
         # PART 1: 4 Đáp án
         if 'part_1' in data:
             transcript += "Part 1. Directions: For each question, you will listen to four statements about a picture. Choose the one that best describes what you see.\n"
@@ -942,7 +945,8 @@ async def download_ai_audio(test_id: int):
                 transcript += f"Number {idx + 1}. Look at the picture.\n"
                 for opt in ['a', 'b', 'c', 'd']:
                     if q.get(f'dap_an_{opt}'): transcript += f"({opt.upper()}) {q[f'dap_an_{opt}']}.\n"
-                transcript += "\n"
+                # Chèn nghỉ 2s giữa các câu hỏi
+                transcript += pause_2s
 
         # PART 2: Câu hỏi + 3 Đáp án
         if 'part_2' in data:
@@ -952,16 +956,21 @@ async def download_ai_audio(test_id: int):
                 if q.get('cau_hoi'): transcript += f"{q['cau_hoi']}\n"
                 for opt in ['a', 'b', 'c']:
                     if q.get(f'dap_an_{opt}'): transcript += f"({opt.upper()}) {q[f'dap_an_{opt}']}.\n"
-                transcript += "\n"
+                # Chèn nghỉ 2s giữa các câu hỏi
+                transcript += pause_2s
 
-        # PART 3 & 4: CHỈ ĐỌC TRANSCRIPT (Tuyệt đối không đọc câu hỏi/đáp án)
+        # PART 3 & 4: CHỈ ĐỌC TRANSCRIPT 
         for part in ['part_3', 'part_4']:
             if part in data:
                 transcript += f"{part.replace('_', ' ').title()}. Directions: You will hear some conversations or talks.\n"
                 for item in data[part]:
                     transcript += "Questions refer to the following audio.\n"
-                    if item.get('doan_van'): transcript += f"{item['doan_van']}\n\n"
+                    if item.get('doan_van'): transcript += f"{item['doan_van']}\n"
+                    
+                    # Chèn nghỉ 5s 
+                    transcript += pause_5s
 
+        # Dùng giọng JennyNeural và hạ tốc độ đọc 
         communicate = edge_tts.Communicate(transcript, "en-US-JennyNeural", rate="-10%")
         await communicate.save(audio_path)
 

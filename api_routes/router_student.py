@@ -7,7 +7,7 @@ import os
 import random
 import google.generativeai as genai
 
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+genai.configure(api_key=os.getenv("HUGGING_FACE_API_KEY"))
 router = APIRouter()
 
 

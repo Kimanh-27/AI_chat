@@ -978,11 +978,13 @@ async def generate_ai_media(test_id: int):
             <style>
                 body {{ font-family: Helvetica, sans-serif; font-size: 14px; color: #333; }}
                 h1 {{ text-align: center; color: #1e3a8a; }}
-                h2 {{ color: #4f46e5; border-bottom: 1px solid #ccc; padding-bottom: 5px; }}
+                h2 {{ color: #4f46e5; border-bottom: 2px solid #ccc; padding-bottom: 5px; margin-top: 30px; }}
                 .question {{ font-weight: bold; margin-top: 15px; margin-bottom: 5px; }}
-                .passage {{ background-color: #f8fafc; padding: 10px; font-style: italic; border-left: 3px solid #3b82f6; margin-bottom: 10px; }}
+                .passage {{ background-color: #f8fafc; padding: 15px; border: 1px solid #cbd5e1; margin-bottom: 15px; font-style: italic; }}
                 ul {{ list-style-type: none; padding-left: 0; margin-top: 0; }}
                 li {{ margin-bottom: 3px; }}
+                .img-center {{ text-align: center; margin-bottom: 15px; }}
+                img {{ max-width: 350px; max-height: 250px; border: 1px solid #ccc; }}
             </style>
         </head>
         <body>
@@ -994,28 +996,66 @@ async def generate_ai_media(test_id: int):
             if part in data:
                 html_content += f"<h2>{part.replace('_', ' ').upper()}</h2>"
                 for item in data[part]:
-                    if item.get('doan_van'):
-                        html_content += f"<div class='passage'>{item['doan_van']}</div>"
                     
-                    if 'danh_sach_cau_hoi' in item:
-                        for sq in item['danh_sach_cau_hoi']:
-                            html_content += f"<div class='question'>Q{pdf_q_count}: {sq.get('cau_hoi','')}</div><ul>"
+                    # --- PART 1: Chỉ Ảnh và A, B, C, D ---
+                    if part == 'part_1':
+                        if item.get('hinh_anh'):
+                            img_url = item['hinh_anh']
+                            if str(img_url).startswith('/'):
+                                img_url = f"https://ai-chat-zsg4.onrender.com{img_url}"
+                            html_content += f"<div class='img-center'><img src='{img_url}'></div>"
+                        html_content += f"<div class='question'>Question {pdf_q_count}.</div>"
+                        html_content += "<ul><li>(A)</li><li>(B)</li><li>(C)</li><li>(D)</li></ul>"
+                        pdf_q_count += 1
+
+                    # --- PART 2: Không Câu hỏi, Chỉ A, B, C ---
+                    elif part == 'part_2':
+                        html_content += f"<div class='question'>Question {pdf_q_count}.</div>"
+                        html_content += "<ul><li>(A)</li><li>(B)</li><li>(C)</li></ul>"
+                        pdf_q_count += 1
+
+                    # --- PART 3 & 4: Giấu Đoạn văn (Transcript), Chỉ hiện Câu hỏi + Các đáp án ---
+                    elif part in ['part_3', 'part_4']:
+                        if 'danh_sach_cau_hoi' in item:
+                            for sq in item['danh_sach_cau_hoi']:
+                                html_content += f"<div class='question'>Question {pdf_q_count}: {sq.get('cau_hoi','')}</div><ul>"
+                                for opt in ['a', 'b', 'c', 'd']:
+                                    if sq.get(f'dap_an_{opt}'):
+                                        html_content += f"<li><b>({opt.upper()})</b> {sq[f'dap_an_{opt}']}</li>"
+                                html_content += "</ul>"
+                                pdf_q_count += 1
+                        else:
+                            html_content += f"<div class='question'>Question {pdf_q_count}: {item.get('cau_hoi','')}</div><ul>"
                             for opt in ['a', 'b', 'c', 'd']:
-                                if sq.get(f'dap_an_{opt}'):
-                                    html_content += f"<li><b>({opt.upper()})</b> {sq[f'dap_an_{opt}']}</li>"
+                                if item.get(f'dap_an_{opt}'):
+                                    html_content += f"<li><b>({opt.upper()})</b> {item[f'dap_an_{opt}']}</li>"
                             html_content += "</ul>"
                             pdf_q_count += 1
+
+                    # --- PART 5, 6, 7: Hiện đầy đủ Đoạn văn, Câu hỏi, Đáp án ---
                     else:
-                        html_content += f"<div class='question'>Q{pdf_q_count}: {item.get('cau_hoi','')}</div><ul>"
-                        for opt in ['a', 'b', 'c', 'd']:
-                            if item.get(f'dap_an_{opt}'):
-                                html_content += f"<li><b>({opt.upper()})</b> {item[f'dap_an_{opt}']}</li>"
-                        html_content += "</ul>"
-                        pdf_q_count += 1
+                        if item.get('doan_van'):
+                            doan_van_html = item['doan_van'].replace('\n', '<br>')
+                            html_content += f"<div class='passage'>{doan_van_html}</div>"
                         
+                        if 'danh_sach_cau_hoi' in item:
+                            for sq in item['danh_sach_cau_hoi']:
+                                html_content += f"<div class='question'>Question {pdf_q_count}: {sq.get('cau_hoi','')}</div><ul>"
+                                for opt in ['a', 'b', 'c', 'd']:
+                                    if sq.get(f'dap_an_{opt}'):
+                                        html_content += f"<li><b>({opt.upper()})</b> {sq[f'dap_an_{opt}']}</li>"
+                                html_content += "</ul>"
+                                pdf_q_count += 1
+                        else:
+                            html_content += f"<div class='question'>Question {pdf_q_count}: {item.get('cau_hoi','')}</div><ul>"
+                            for opt in ['a', 'b', 'c', 'd']:
+                                if item.get(f'dap_an_{opt}'):
+                                    html_content += f"<li><b>({opt.upper()})</b> {item[f'dap_an_{opt}']}</li>"
+                            html_content += "</ul>"
+                            pdf_q_count += 1
+                            
         html_content += "</body></html>"
         
-        # Ghi file PDF
         with open(pdf_path, "w+b") as pdf_file:
             pisa.CreatePDF(html_content, dest=pdf_file)
 

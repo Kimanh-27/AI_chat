@@ -242,7 +242,7 @@ async def get_student_iig_test(id_de_thi: int):
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        sql = "SELECT id, ten_de, file_pdf, file_audio FROM de_thi_iig WHERE id = %s"
+        sql = "SELECT id, ten_de, nguon_goc, dap_an_json, file_pdf, file_audio FROM de_thi_iig WHERE id = %s"
         cursor.execute(sql, (id_de_thi,))
         test = cursor.fetchone()
         
@@ -374,7 +374,7 @@ async def get_student_iig_tests(id_hoc_sinh: int):
         cursor = db.cursor(dictionary=True)
         
         sql = """
-            SELECT d.id, d.ten_de, d.nam_phat_hanh, d.ngay_tao,
+            SELECT d.id, d.ten_de, d.nam_phat_hanh, d.ngay_tao, d.nguon_goc, d.file_pdf, d.file_audio,
                    k.id as id_ket_qua, k.tong_diem, k.ngay_thi
             FROM de_thi_iig d
             LEFT JOIN (

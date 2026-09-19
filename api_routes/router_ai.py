@@ -597,7 +597,16 @@ async def generate_listening_stream_api(
                     random_topics = ", ".join(random.sample(TOEIC_DYNAMIC_TOPICS, 3))
                     system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size)).replace("{random_topics}", random_topics)
 
-                    system_prompt += "\n\nQUY TẮC BẢO VỆ CẤU TRÚC JSON:\n1. Kết quả trả về BẮT BUỘC phải là JSON hợp lệ 100%. TẤT CẢ các Key và Value (chuỗi) PHẢI được bọc bên trong dấu ngoặc kép (\").\n2. Để tránh làm vỡ định dạng JSON, nếu BÊN TRONG nội dung văn bản (đoạn văn, câu hỏi, giải thích) cần trích dẫn, hãy dùng dấu nháy đơn ('). TUYỆT ĐỐI KHÔNG dùng dấu ngoặc kép (\") ở phần nội dung bên trong chuỗi."
+                    system_prompt += """
+
+QUY TẮC BẢO VỆ CẤU TRÚC JSON VÀ KỶ LUẬT NGÔN NGỮ:
+1. Kết quả trả về BẮT BUỘC phải là JSON hợp lệ 100%. TẤT CẢ các Key và Value (chuỗi) PHẢI được bọc bên trong dấu ngoặc kép (").
+2. Để tránh làm vỡ định dạng JSON, nếu BÊN TRONG nội dung văn bản (đoạn văn, câu hỏi, giải thích) cần trích dẫn, hãy dùng dấu nháy đơn ('). TUYỆT ĐỐI KHÔNG dùng dấu ngoặc kép (") ở phần nội dung bên trong chuỗi.
+3. KỶ LUẬT NGÔN NGỮ (QUAN TRỌNG TỐI THƯỢNG):
+   - Các trường `doan_van`, `cau_hoi`, `dap_an_a`, `dap_an_b`, `dap_an_c`, `dap_an_d` phải giữ nguyên gốc TIẾNG ANH (English).
+   - RIÊNG TRƯỜNG `giai_thich`: BẮT BUỘC 100% PHẢI DỊCH VÀ VIẾT BẰNG TIẾNG VIỆT (Vietnamese). 
+   - TUYỆT ĐỐI KHÔNG viết phần `giai_thich` bằng Tiếng Anh, Tiếng Trung hay bất kỳ ngôn ngữ nào khác. Viết sai ngôn ngữ sẽ khiến hệ thống sụp đổ.
+"""
 
                     batch_success = False
                     for attempt in range(3):
@@ -676,7 +685,16 @@ async def generate_reading_56_stream_api(test_name: str = Form(...)):
                     random_topics = ", ".join(random.sample(TOEIC_DYNAMIC_TOPICS, 3))
                     system_prompt = config["system_prompt"].replace("{num_questions}", str(current_batch_size)).replace("{random_topics}", random_topics)
                                         
-                    system_prompt += "\n\nQUY TẮC BẢO VỆ CẤU TRÚC JSON:\n1. Kết quả trả về BẮT BUỘC phải là JSON hợp lệ 100%. TẤT CẢ các Key và Value (chuỗi) PHẢI được bọc bên trong dấu ngoặc kép (\").\n2. Để tránh làm vỡ định dạng JSON, nếu BÊN TRONG nội dung văn bản (đoạn văn, câu hỏi, giải thích) cần trích dẫn, hãy dùng dấu nháy đơn ('). TUYỆT ĐỐI KHÔNG dùng dấu ngoặc kép (\") ở phần nội dung bên trong chuỗi."
+                    system_prompt += """
+
+QUY TẮC BẢO VỆ CẤU TRÚC JSON VÀ KỶ LUẬT NGÔN NGỮ:
+1. Kết quả trả về BẮT BUỘC phải là JSON hợp lệ 100%. TẤT CẢ các Key và Value (chuỗi) PHẢI được bọc bên trong dấu ngoặc kép (").
+2. Để tránh làm vỡ định dạng JSON, nếu BÊN TRONG nội dung văn bản (đoạn văn, câu hỏi, giải thích) cần trích dẫn, hãy dùng dấu nháy đơn ('). TUYỆT ĐỐI KHÔNG dùng dấu ngoặc kép (") ở phần nội dung bên trong chuỗi.
+3. KỶ LUẬT NGÔN NGỮ (QUAN TRỌNG TỐI THƯỢNG):
+   - Các trường `doan_van`, `cau_hoi`, `dap_an_a`, `dap_an_b`, `dap_an_c`, `dap_an_d` phải giữ nguyên gốc TIẾNG ANH (English).
+   - RIÊNG TRƯỜNG `giai_thich`: BẮT BUỘC 100% PHẢI DỊCH VÀ VIẾT BẰNG TIẾNG VIỆT (Vietnamese). 
+   - TUYỆT ĐỐI KHÔNG viết phần `giai_thich` bằng Tiếng Anh, Tiếng Trung hay bất kỳ ngôn ngữ nào khác. Viết sai ngôn ngữ sẽ khiến hệ thống sụp đổ.
+"""
                     batch_success = False
                     for attempt in range(3):
                         try:
@@ -761,7 +779,16 @@ async def generate_reading_7_stream_api(test_name: str = Form(...)):
                 random_topics = ", ".join(random.sample(TOEIC_DYNAMIC_TOPICS, 3))
                 system_prompt = config["system_prompt"].replace("{format_type}", batch['type']).replace("{exact_q_count}", str(batch['q_count'])).replace("{random_topics}", random_topics)
 
-                system_prompt += "\n\nQUY TẮC BẢO VỆ CẤU TRÚC JSON:\n1. Kết quả trả về BẮT BUỘC phải là JSON hợp lệ 100%. TẤT CẢ các Key và Value (chuỗi) PHẢI được bọc bên trong dấu ngoặc kép (\").\n2. Để tránh làm vỡ định dạng JSON, nếu BÊN TRONG nội dung văn bản (đoạn văn, câu hỏi, giải thích) cần trích dẫn, hãy dùng dấu nháy đơn ('). TUYỆT ĐỐI KHÔNG dùng dấu ngoặc kép (\") ở phần nội dung bên trong chuỗi."
+                system_prompt += """
+
+QUY TẮC BẢO VỆ CẤU TRÚC JSON VÀ KỶ LUẬT NGÔN NGỮ:
+1. Kết quả trả về BẮT BUỘC phải là JSON hợp lệ 100%. TẤT CẢ các Key và Value (chuỗi) PHẢI được bọc bên trong dấu ngoặc kép (").
+2. Để tránh làm vỡ định dạng JSON, nếu BÊN TRONG nội dung văn bản (đoạn văn, câu hỏi, giải thích) cần trích dẫn, hãy dùng dấu nháy đơn ('). TUYỆT ĐỐI KHÔNG dùng dấu ngoặc kép (") ở phần nội dung bên trong chuỗi.
+3. KỶ LUẬT NGÔN NGỮ (QUAN TRỌNG TỐI THƯỢNG):
+   - Các trường `doan_van`, `cau_hoi`, `dap_an_a`, `dap_an_b`, `dap_an_c`, `dap_an_d` phải giữ nguyên gốc TIẾNG ANH (English).
+   - RIÊNG TRƯỜNG `giai_thich`: BẮT BUỘC 100% PHẢI DỊCH VÀ VIẾT BẰNG TIẾNG VIỆT (Vietnamese). 
+   - TUYỆT ĐỐI KHÔNG viết phần `giai_thich` bằng Tiếng Anh, Tiếng Trung hay bất kỳ ngôn ngữ nào khác. Viết sai ngôn ngữ sẽ khiến hệ thống sụp đổ.
+"""
                 batch_success = False
                 for attempt in range(3):
                     try:

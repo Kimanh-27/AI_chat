@@ -142,6 +142,33 @@ async def get_ai_test_detail_api(test_id: int):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+# ==========================================
+# API CẬP NHẬT ĐỀ THI AI (SỬA JSON ĐỀ CŨ)
+# ==========================================
+@router.post("/update-ai-test/{test_id}")
+async def update_ai_test_api(test_id: int, data: dict, admin_id: int = 0):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+        
+        dap_an_json = data.get("dap_an_json")
+        if not dap_an_json:
+            return {"status": "error", "message": "Dữ liệu JSON không hợp lệ"}
+            
+        # Cập nhật lại nội dung JSON
+        cursor.execute("UPDATE de_thi_iig SET dap_an_json = %s WHERE id = %s", (dap_an_json, test_id))
+        
+        # Ghi log
+        if admin_id > 0:
+            chi_tiet_log = f"Đã sửa nội dung JSON đề AI (ID: #{test_id})"
+            cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'SUA_DE_AI', %s)", (admin_id, chi_tiet_log))
+
+        db.commit() 
+        db.close()
+        return {"status": "success", "message": "Cập nhật thành công!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    
 # =============================================================
 # ===   API XÓA ĐỀ THI AI                                   ===
 # =============================================================

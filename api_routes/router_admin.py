@@ -8,6 +8,8 @@ import os
 from datetime import datetime
 import pymupdf as fitz 
 from schemas import UpdateAnswersModel, AccountModel, ClassModel, UpdateProfileModel, TaiLieuHocModel
+from dotenv import load_dotenv
+from huggingface_hub import AsyncInferenceClient
 import bcrypt  
 import google.generativeai as genai
 from typing import Optional
@@ -17,6 +19,10 @@ router = APIRouter()
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
     return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+
+load_dotenv()
+HF_TOKEN = os.getenv("HUGGING_FACE_API_KEY")
+hf_client = AsyncInferenceClient(api_key=HF_TOKEN)
 
 # ==========================================
 # API ADMIN: TẢI ĐỀ IIG LÊN HỆ THỐNG
@@ -946,9 +952,43 @@ async def get_system_logs():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# =========================================================================
-# API ADMIN: BÓC TÁCH PDF/ẢNH BẰNG AI & PYMUPDF (FIX LỖI KEYERROR)
-# =========================================================================
+# ===================================================================
+# HÀM BỔ TRỢ GHI LOG HỆ THỐNG
+# ===================================================================
+def write_system_log(cursor, id_tai_khoan, action_desc): #cả 3 router (ở đầu file router trước khi viết api)
+    try:
+        cursor.execute("SELECT ten_dang_nhap FROM tai_khoan WHERE id = %s", (id_tai_khoan,))
+        user = cursor.fetchone()
+        ten_tk = user['ten_dang_nhap'] if isinstance(user, dict) and user else (user[0] if user else "Unknown")
+        
+        sql_log = "INSERT INTO lich_su_xem_tai_lieu (id_tai_khoan, ten_tai_khoan, hanh_dong) VALUES (%s, %s, %s)"
+        cursor.execute(sql_log, (id_tai_khoan, ten_tk, action_desc))
+    except Exception as e:
+        print("LỖI GHI LOG:", e)
+
+# ===================================================================
+# NHÓM 1: UPLOAD VÀ XỬ LÝ TÀI LIỆU BẰNG AI
+# ===================================================================
+@router.post("/upload-document-only")
+async def upload_document_only(file: UploadFile = File(...)):
+    try:
+        goc_dir = "uploads/tai_lieu_goc"
+        os.makedirs(goc_dir, exist_ok=True)
+        
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        file_id = uuid.uuid4().hex
+        
+        saved_filename = f"{file_id}{file_ext}"
+        saved_filepath = os.path.join(goc_dir, saved_filename)
+        with open(saved_filepath, "wb") as buffer:
+            buffer.write(await file.read())
+            
+        file_goc_url = f"http://127.0.0.1:80/ai_local/AI_chat/uploads/tai_lieu_goc/{saved_filename}"
+        
+        return {"status": "success", "file_goc": file_goc_url}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @router.post("/extract-document-ai")
 async def extract_document_ai(file: UploadFile = File(...)):
     try:
@@ -993,7 +1033,7 @@ async def extract_document_ai(file: UploadFile = File(...)):
 
         # 3. RÃ ẢNH LẤY CHỮ
         elif file_ext in ['.png', '.jpg', '.jpeg']:
-            model = genai.GenerativeModel('gemini-3.6-flash')
+            model = genai.GenerativeModel('gemini-3.8-flash')
             with open(saved_filepath, "rb") as f:
                 image_parts = [{"mime_type": file.content_type, "data": f.read()}]
             response = await model.generate_content_async([
@@ -1004,20 +1044,27 @@ async def extract_document_ai(file: UploadFile = File(...)):
         else:
             return {"status": "error", "message": "Chỉ hỗ trợ PDF hoặc Hình ảnh."}
 
-        # 4. AI LÀM ĐẸP (POLISH) TRƯỚC KHI TRẢ VỀ
+# 4. AI LÀM ĐẸP (POLISH) TRƯỚC KHI TRẢ VỀ DÙNG QWEN3-14B
         if raw_html:
-            prompt = f"""
-            Dưới đây là HTML thô bóc tách từ tài liệu. Hãy định dạng lại thành một bài giảng tiếng Anh siêu đẹp, dễ đọc (Dùng <h3>, <ul>, <li>, in đậm).
-            LỆNH TUYỆT ĐỐI BẮT BUỘC: 
-            1. GIỮ NGUYÊN 100% các thẻ <img src="..."> và vị trí của chúng. KHÔNG tự tạo link ảnh ảo.
-            2. Xóa các ký tự rác, nối các câu bị ngắt dòng sai.
-            Chỉ trả về HTML sạch.
-            [HTML THÔ]
-            {raw_html}
-            """
-            model = genai.GenerativeModel('gemini-3.6-flash')
-            response = await model.generate_content_async(prompt)
-            clean_html = response.text.replace("```html", "").replace("```", "").strip()
+            messages = [
+                {
+                    "role": "system",
+                    "content": "Bạn là chuyên gia thiết kế web. Nhiệm vụ của bạn là cấu trúc lại HTML thô thành bài giảng đẹp mắt (Dùng <h3>, <ul>, <li>, in đậm). LỆNH BẮT BUỘC: Chỉ trả về mã HTML sạch. TUYỆT ĐỐI GIỮ NGUYÊN 100% các thẻ <img src=\"...\"> và vị trí của chúng. Không tự sáng tác thêm."
+                },
+                {
+                    "role": "user",
+                    "content": f"[HTML THÔ CẦN XỬ LÝ]\n{raw_html}"
+                }
+            ]
+            
+            response = await hf_client.chat_completion(
+                model="Qwen/Qwen3-14B",
+                messages=messages,
+                max_tokens=2500,
+                temperature=0.1 # Để nhiệt độ thấp giúp định dạng HTML chuẩn xác hơn
+            )
+            
+            clean_html = response.choices[0].message.content.replace("```html", "").replace("```", "").strip()
             return {"status": "success", "data": clean_html, "file_goc": file_goc_url}
 
         return {"status": "error", "message": "Không có nội dung bóc tách."}
@@ -1027,41 +1074,59 @@ async def extract_document_ai(file: UploadFile = File(...)):
         traceback.print_exc()
         return {"status": "error", "message": f"Lỗi Backend: {str(e)}"}
 
+
+# ===================================================================
+# NHÓM 2: QUẢN LÝ DỮ LIỆU TÀI LIỆU (CRUD)
+# ===================================================================
 @router.get("/get-all-grammar-docs")
 async def get_all_grammar_docs():
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
-        cursor.execute("SELECT id, tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, ngay_tao FROM tai_lieu_hoc ORDER BY id DESC")
+        # ĐÃ SỬA: Nối qua tk.id thay vì tk.id_tai_khoan
+        sql = """
+            SELECT t.*, tk.vai_tro as vai_tro_tao, tk.ten_dang_nhap as ten_nguoi_tao 
+            FROM tai_lieu_hoc t 
+            LEFT JOIN tai_khoan tk ON t.id_nguoi_tao = tk.id 
+            ORDER BY t.id DESC
+        """
+        cursor.execute(sql)
         docs = cursor.fetchall()
         db.close()
         return {"status": "success", "data": docs}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@router.get("/get-grammar-doc/{doc_id}")
-async def get_grammar_doc(doc_id: int):
-    try:
-        db = get_db_connection()
-        cursor = db.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
-        doc = cursor.fetchone()
-        db.close()
-        return {"status": "success", "data": doc} if doc else {"status": "error", "message": "Không tìm thấy!"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
 @router.post("/save-grammar-doc")
-async def save_grammar_doc(doc: TaiLieuHocModel):
+async def save_grammar_doc(doc: TaiLieuHocModel): 
     try:
         db = get_db_connection()
         cursor = db.cursor()
+
+        # 1. KIỂM TRA TRÙNG TÊN TÀI LIỆU
         if doc.id:
-            sql = "UPDATE tai_lieu_hoc SET tieu_de=%s, loai_tai_lieu=%s, tags=%s, noi_dung=%s, file_goc=%s WHERE id=%s"
-            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.id))
+            cursor.execute("SELECT id FROM tai_lieu_hoc WHERE tieu_de = %s AND id != %s", (doc.tieu_de, doc.id))
         else:
-            sql = "INSERT INTO tai_lieu_hoc (tieu_de, loai_tai_lieu, tags, noi_dung, file_goc) VALUES (%s, %s, %s, %s, %s)"
-            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc))
+            cursor.execute("SELECT id FROM tai_lieu_hoc WHERE tieu_de = %s", (doc.tieu_de,))
+            
+        if cursor.fetchone():
+            db.close()
+            return {"status": "error", "message": "Tên tài liệu này đã tồn tại trong kho. Vui lòng chọn tên khác!"}
+
+        # 2. TIẾN HÀNH LƯU
+        if doc.id:
+            sql = "UPDATE tai_lieu_hoc SET tieu_de=%s, loai_tai_lieu=%s, tags=%s, noi_dung=%s, file_goc=%s, bai_tap_json=%s WHERE id=%s"
+            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.bai_tap_json, doc.id))
+        else:
+            sql = "INSERT INTO tai_lieu_hoc (tieu_de, loai_tai_lieu, tags, noi_dung, file_goc, id_nguoi_tao, bai_tap_json) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.file_goc, doc.id_nguoi_tao, doc.bai_tap_json))
+            
+        # --- BỔ SUNG GHI LOG ---
+        hieu_lenh = "đã sửa" if doc.id else "đã thêm"
+        hanh_dong = f"{hieu_lenh} tài liệu: {doc.tieu_de}"
+        write_system_log(cursor, doc.id_nguoi_tao, hanh_dong)
+        # -----------------------
+
         db.commit()
         db.close()
         return {"status": "success", "message": "Đã lưu tài liệu thành công!"}
@@ -1069,93 +1134,68 @@ async def save_grammar_doc(doc: TaiLieuHocModel):
         return {"status": "error", "message": str(e)}
 
 @router.post("/delete-grammar-doc/{doc_id}")
-async def delete_grammar_doc(doc_id: int):
-    try:
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute("DELETE FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
-        db.commit()
-        db.close()
-        return {"status": "success", "message": "Đã xóa tài liệu!"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-# =========================================================================
-# API ADMIN: QUẢN LÝ TÀI LIỆU HỌC (CRUD DB)
-# =========================================================================
-
-@router.get("/get-all-grammar-docs")
-async def get_all_grammar_docs():
+async def delete_grammar_doc(doc_id: int, id_admin: int = Query(0)):
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        # BỔ SUNG THÊM 'noi_dung' VÀO CÂU LỆNH SELECT Ở ĐÂY 👇
-        cursor.execute("SELECT id, tieu_de, loai_tai_lieu, tags, noi_dung, ngay_tao FROM tai_lieu_hoc ORDER BY id DESC")
-        
-        docs = cursor.fetchall()
-        db.close()
-        return {"status": "success", "data": docs}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-@router.get("/get-grammar-doc/{doc_id}")
-async def get_grammar_doc(doc_id: int):
-    try:
-        db = get_db_connection()
-        cursor = db.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+        # 1. Lấy thông tin tài liệu trước khi xóa (Bắt buộc phải có id_nguoi_tao)
+        cursor.execute("SELECT tieu_de, id_nguoi_tao FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
         doc = cursor.fetchone()
-        db.close()
+        
         if doc:
-            return {"status": "success", "data": doc}
-        return {"status": "error", "message": "Không tìm thấy tài liệu!"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@router.post("/save-grammar-doc")
-async def save_grammar_doc(doc: TaiLieuHocModel):
-    try:
-        db = get_db_connection()
-        cursor = db.cursor()
-        if doc.id:
-            sql = """UPDATE tai_lieu_hoc 
-                     SET tieu_de=%s, loai_tai_lieu=%s, tags=%s, noi_dung=%s 
-                     WHERE id=%s"""
-            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung, doc.id))
-            msg = "Đã cập nhật tài liệu thành công!"
-        else:
-            sql = """INSERT INTO tai_lieu_hoc (tieu_de, loai_tai_lieu, tags, noi_dung) 
-                     VALUES (%s, %s, %s, %s)"""
-            cursor.execute(sql, (doc.tieu_de, doc.loai_tai_lieu, doc.tags, doc.noi_dung))
-            msg = "Đã tạo tài liệu mới thành công!"
-        db.commit()
-        db.close()
-        return {"status": "success", "message": msg}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@router.post("/delete-grammar-doc/{doc_id}")
-async def delete_grammar_doc(doc_id: int):
-    try:
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute("DELETE FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
-        db.commit()
+            # 2. Xóa tài liệu
+            cursor.execute("DELETE FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+            
+            # --- 3. BỔ SUNG GHI LOG ---
+            # Nếu Frontend không gửi id_admin, lấy tạm id_nguoi_tao làm người thực hiện hành động
+            nguoi_thuc_hien = id_admin if id_admin > 0 else doc['id_nguoi_tao']
+            hanh_dong = f"Đã xóa tài liệu: '{doc['tieu_de']}'"
+            write_system_log(cursor, nguoi_thuc_hien, hanh_dong)
+            # -----------------------
+            
+            db.commit()
+            
         db.close()
         return {"status": "success", "message": "Đã xóa tài liệu khỏi hệ thống!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+# ===================================================================
+# NHÓM 3: GHI NHẬN VÀ TRUY XUẤT LỊCH SỬ XEM TÀI LIỆU
+# ===================================================================
+@router.get("/document-view-logs") #router_admin and router_teacher
+async def get_document_view_logs():
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        
+        sql = """
+            SELECT l.id, l.ten_tai_khoan, l.hanh_dong, l.thoi_gian, t.vai_tro
+            FROM lich_su_xem_tai_lieu l
+            LEFT JOIN tai_khoan t ON l.id_tai_khoan = t.id
+            ORDER BY l.thoi_gian DESC LIMIT 200
+        """
+        cursor.execute(sql)
+        logs = cursor.fetchall()
+        db.close()
+        
+        for log in logs:
+            if log.get('thoi_gian'):
+                log['thoi_gian'] = log['thoi_gian'].strftime("%d/%m/%Y %H:%M:%S")
+                
+        return {"status": "success", "data": logs}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
-@router.get("/all-doc-view-history")
+@router.get("/all-doc-view-history") #router_admin.py
 async def get_all_doc_view_history():
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         sql = """
-            SELECT h.ten_hoc_sinh, t.tieu_de, x.thoi_gian_xem
-            FROM lich_su_xem_tai_lieu x
-            JOIN hoc_sinh h ON x.id_hoc_sinh = h.id_tai_khoan
-            JOIN tai_lieu_hoc t ON x.id_tai_lieu = t.id
-            ORDER BY x.thoi_gian_xem DESC LIMIT 200
+            SELECT ten_tai_khoan as ten_hoc_sinh, hanh_dong as tieu_de, thoi_gian as thoi_gian_xem
+            FROM lich_su_xem_tai_lieu
+            ORDER BY thoi_gian DESC LIMIT 200
         """
         cursor.execute(sql)
         history = cursor.fetchall()

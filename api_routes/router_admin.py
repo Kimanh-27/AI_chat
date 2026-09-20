@@ -21,23 +21,15 @@ def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
     return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
 def write_system_log(cursor, id_tai_khoan, action_desc):
-    """
-    Hàm tiện ích tự động tra cứu thông tin tài khoản và ghi log
-    Lưu ý: Bạn phải gọi db.commit() sau khi dùng hàm này ở route chính.
-    """
     try:
-        # 1. Tìm thông tin người dùng từ DB
-        cursor.execute("SELECT ten_dang_nhap, vai_tro FROM tai_khoan WHERE id = %s", (id_tai_khoan,))
+        # Lấy tên đăng nhập từ bảng tai_khoan
+        cursor.execute("SELECT ten_dang_nhap FROM tai_khoan WHERE id = %s", (id_tai_khoan,))
         user = cursor.fetchone()
+        ten_tk = user['ten_dang_nhap'] if isinstance(user, dict) and user else (user[0] if user else "Unknown")
         
-        if user:
-            # Tương thích với cả cursor tuple và dictionary
-            ten = user['ten_dang_nhap'] if isinstance(user, dict) else user[0]
-            vai_tro = user['vai_tro'] if isinstance(user, dict) else user[1]
-            
-            # 2. Ghi vào bảng nhật ký
-            sql_log = "INSERT INTO lich_su_xem_tai_lieu (id_tai_khoan, ten_tai_khoan, vai_tro, hanh_dong) VALUES (%s, %s, %s, %s)"
-            cursor.execute(sql_log, (id_tai_khoan, ten, vai_tro, action_desc))
+        # INSERT đúng 3 cột theo thiết kế của Kim Anh
+        sql_log = "INSERT INTO lich_su_xem_tai_lieu (id_tai_khoan, ten_tai_khoan, hanh_dong) VALUES (%s, %s, %s)"
+        cursor.execute(sql_log, (id_tai_khoan, ten_tk, action_desc))
     except Exception as e:
         print("LỖI GHI LOG:", e)
 
@@ -885,20 +877,27 @@ async def extract_document_ai(file: UploadFile = File(...)):
         else:
             return {"status": "error", "message": "Chỉ hỗ trợ PDF hoặc Hình ảnh."}
 
-        # 4. AI LÀM ĐẸP (POLISH) TRƯỚC KHI TRẢ VỀ
+# 4. AI LÀM ĐẸP (POLISH) TRƯỚC KHI TRẢ VỀ DÙNG QWEN3-14B
         if raw_html:
-            prompt = f"""
-            Dưới đây là HTML thô bóc tách từ tài liệu. Hãy định dạng lại thành một bài giảng tiếng Anh siêu đẹp, dễ đọc (Dùng <h3>, <ul>, <li>, in đậm).
-            LỆNH TUYỆT ĐỐI BẮT BUỘC: 
-            1. GIỮ NGUYÊN 100% các thẻ <img src="..."> và vị trí của chúng. KHÔNG tự tạo link ảnh ảo.
-            2. Xóa các ký tự rác, nối các câu bị ngắt dòng sai.
-            Chỉ trả về HTML sạch.
-            [HTML THÔ]
-            {raw_html}
-            """
-            model = genai.GenerativeModel('gemini-3.8-flash')
-            response = await model.generate_content_async(prompt)
-            clean_html = response.text.replace("```html", "").replace("```", "").strip()
+            messages = [
+                {
+                    "role": "system",
+                    "content": "Bạn là chuyên gia thiết kế web. Nhiệm vụ của bạn là cấu trúc lại HTML thô thành bài giảng đẹp mắt (Dùng <h3>, <ul>, <li>, in đậm). LỆNH BẮT BUỘC: Chỉ trả về mã HTML sạch. TUYỆT ĐỐI GIỮ NGUYÊN 100% các thẻ <img src=\"...\"> và vị trí của chúng. Không tự sáng tác thêm."
+                },
+                {
+                    "role": "user",
+                    "content": f"[HTML THÔ CẦN XỬ LÝ]\n{raw_html}"
+                }
+            ]
+            
+            response = await hf_client.chat_completion(
+                model="Qwen/Qwen3-14B",
+                messages=messages,
+                max_tokens=2500,
+                temperature=0.1 # Để nhiệt độ thấp giúp định dạng HTML chuẩn xác hơn
+            )
+            
+            clean_html = response.choices[0].message.content.replace("```html", "").replace("```", "").strip()
             return {"status": "success", "data": clean_html, "file_goc": file_goc_url}
 
         return {"status": "error", "message": "Không có nội dung bóc tách."}
@@ -1139,10 +1138,10 @@ async def get_system_activity_logs():
             UNION ALL
             
             -- 2. Học sinh xem học liệu
-            SELECT 'hoc_sinh' as role, h.ten_hoc_sinh as name, 
-                   CONCAT('Vừa xem học liệu: ', t.tieu_de) as action, 
-                   x.thoi_gian_xem as time
-            FROM lich_su_xem_tai_lieu x
+            SELECT 'hoc_sinh' as role, ten_tai_khoan as name, 
+                   hanh_dong as action, 
+                   thoi_gian as time
+            FROM lich_su_xem_tai_lieu
             JOIN hoc_sinh h ON x.id_hoc_sinh = h.id_tai_khoan
             JOIN tai_lieu_hoc t ON x.id_tai_lieu = t.id
             
@@ -1231,11 +1230,9 @@ async def get_all_doc_view_history():
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         sql = """
-            SELECT h.ten_hoc_sinh, t.tieu_de, x.thoi_gian_xem
-            FROM lich_su_xem_tai_lieu x
-            JOIN hoc_sinh h ON x.id_hoc_sinh = h.id_tai_khoan
-            JOIN tai_lieu_hoc t ON x.id_tai_lieu = t.id
-            ORDER BY x.thoi_gian_xem DESC LIMIT 200
+            SELECT ten_tai_khoan as ten_hoc_sinh, hanh_dong as tieu_de, thoi_gian as thoi_gian_xem
+            FROM lich_su_xem_tai_lieu
+            ORDER BY thoi_gian DESC LIMIT 200
         """
         cursor.execute(sql)
         history = cursor.fetchall()
@@ -1353,13 +1350,22 @@ async def get_document_view_logs():
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        cursor.execute("SELECT * FROM lich_su_xem_tai_lieu ORDER BY thoi_gian DESC LIMIT 100")
+        # Sửa lại SQL: Bỏ các bí danh "AS" để trả về đúng tên gốc cho Frontend JS
+        sql = """
+            SELECT l.id, l.ten_tai_khoan, l.hanh_dong, l.thoi_gian, t.vai_tro
+            FROM lich_su_xem_tai_lieu l
+            LEFT JOIN tai_khoan t ON l.id_tai_khoan = t.id
+            ORDER BY l.thoi_gian DESC LIMIT 200
+        """
+        cursor.execute(sql)
         logs = cursor.fetchall()
         db.close()
         
+        # Định dạng thời gian bằng đúng key thoi_gian
         for log in logs:
-            log['thoi_gian'] = log['thoi_gian'].strftime("%d/%m/%Y %H:%M:%S")
-            
+            if log.get('thoi_gian'):
+                log['thoi_gian'] = log['thoi_gian'].strftime("%d/%m/%Y %H:%M:%S")
+                
         return {"status": "success", "data": logs}
     except Exception as e:
         return {"status": "error", "message": str(e)}

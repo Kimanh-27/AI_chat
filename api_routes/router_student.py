@@ -680,24 +680,30 @@ async def get_all_grammar_docs():
         return {"status": "error", "message": str(e)}
         
 @router.post("/log-doc-view")
-async def log_student_view(req: StudentLogRequest):
+async def log_student_view(req: dict): # Hoặc req: StudentLogRequest tùy bạn đang dùng
     try:
         db = get_db_connection()
         cursor = db.cursor(dictionary=True)
         
-        # Lấy tên tài liệu để ghi log cho đẹp
-        cursor.execute("SELECT tieu_de FROM tai_lieu_hoc WHERE id = %s", (req.id_tai_lieu,))
+        id_hs = req.get('id_hoc_sinh')
+        id_tl = req.get('id_tai_lieu')
+        trang_thai = req.get('trang_thai')
+
+        # Lấy tên tài liệu để ghép vào chuỗi hành động
+        cursor.execute("SELECT tieu_de FROM tai_lieu_hoc WHERE id = %s", (id_tl,))
         doc = cursor.fetchone()
-        tieu_de = doc['tieu_de'] if doc else f"ID {req.id_tai_lieu}"
+        tieu_de = doc['tieu_de'] if doc else f"Tài liệu #{id_tl}"
 
-        # Xác định câu văn ghi log dựa vào trạng thái Frontend gửi lên
-        if req.trang_thai == "start":
-            hanh_dong = f"đã truy cập (chưa hoàn thành bài tập) tài liệu: {tieu_de}"
-        else:
-            hanh_dong = f"đã truy cập và hoàn thành quiz tài liệu: {tieu_de}"
+        # Lấy tên học sinh
+        cursor.execute("SELECT ten_dang_nhap FROM tai_khoan WHERE id = %s", (id_hs,))
+        user = cursor.fetchone()
+        ten_tk = user['ten_dang_nhap'] if user else "Học sinh"
 
-        # Ghi vào nhật ký hệ thống
-        write_system_log(cursor, req.id_hoc_sinh, hanh_dong)
+        hanh_dong = f"Đã hoàn thành bài học: {tieu_de}" if trang_thai == "completed" else f"Đang học: {tieu_de}"
+
+        # Ghi log chuẩn 5 cột
+        sql_log = "INSERT INTO lich_su_xem_tai_lieu (id_tai_khoan, ten_tai_khoan, hanh_dong) VALUES (%s, %s, %s)"
+        cursor.execute(sql_log, (id_hs, ten_tk, hanh_dong))
         
         db.commit()
         db.close()

@@ -953,6 +953,20 @@ async def get_all_grammar_docs():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@router.get("/get-grammar-doc/{doc_id}")
+async def get_grammar_doc(doc_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+        doc = cursor.fetchone()
+        db.close()
+        if doc:
+            return {"status": "success", "data": doc}
+        return {"status": "error", "message": "Không tìm thấy tài liệu!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @router.post("/save-grammar-doc")
 async def save_grammar_doc(doc: TaiLieuHocModel): 
     try:

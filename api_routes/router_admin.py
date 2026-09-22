@@ -1209,6 +1209,22 @@ async def get_all_doc_view_history():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@router.get("/get-grammar-doc/{doc_id}")
+async def get_grammar_doc(doc_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+        doc = cursor.fetchone()
+        db.close()
+        
+        if doc:
+            return {"status": "success", "data": doc}
+        else:
+            return {"status": "error", "message": "Không tìm thấy tài liệu!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 # API TẠO CÂU HỎI TRẮC NGHIỆM MỚI DÙNG CHUNG AI (HUGGINGFACE)
 @router.post("/generate-doc-quiz")
 async def generate_doc_quiz(req: GenerateQuizRequest):

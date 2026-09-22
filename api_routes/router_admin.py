@@ -4,10 +4,11 @@ import uuid
 import shutil
 import re
 import random
+import json
 import os
 from datetime import datetime
 import pymupdf as fitz 
-from schemas import UpdateAnswersModel, AccountModel, ClassModel, UpdateProfileModel, TaiLieuHocModel
+from schemas import UpdateAnswersModel, AccountModel, ClassModel, UpdateProfileModel, TaiLieuHocModel, GenerateQuizRequest
 from dotenv import load_dotenv
 from huggingface_hub import AsyncInferenceClient
 import bcrypt  
@@ -1202,4 +1203,101 @@ async def get_all_doc_view_history():
         db.close()
         return {"status": "success", "data": history}
     except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# API TẠO CÂU HỎI TRẮC NGHIỆM MỚI DÙNG CHUNG AI (HUGGINGFACE)
+@router.post("/generate-doc-quiz")
+async def generate_doc_quiz(req: GenerateQuizRequest):
+    try:
+        clean_text = re.sub(r'<[^>]+>', ' ', req.noi_dung).strip()
+        clean_text = clean_text[:4000] 
+        
+        if not clean_text:
+            return {"status": "error", "message": "Nội dung bài giảng đang trống."}
+
+        messages = [
+            {
+                "role": "system",
+                "content": "Bạn là chuyên gia ra đề thi trắc nghiệm Tiếng Anh. YÊU CẦU TỐI THƯỢNG: Chỉ trả về một mảng JSON duy nhất. Không sinh ra bất kỳ văn bản, thẻ markdown (```json), lời giải thích bên ngoài hay lời chào nào khác."
+            },
+            {
+                "role": "user",
+                "content": f"""Nhiệm vụ: Phân tích đoạn văn bản bài học dưới đây. Tự động sinh ra từ {req.so_luong} câu trắc nghiệm tùy thuộc vào độ dài kiến thức.
+
+TIÊU CHÍ CHẤT LƯỢNG:
+1. Nội dung câu hỏi BẮT BUỘC phải nằm trong văn bản cung cấp.
+2. Có 4 đáp án (1 đúng, 3 sai).
+3. LUẬT THÉP CHỐNG LỖI JSON: TUYỆT ĐỐI KHÔNG sử dụng dấu ngoặc kép (") bên trong nội dung câu hỏi, đáp án và giải thích. Nếu cần trích dẫn từ vựng, BẮT BUỘC dùng dấu nháy đơn (').
+- Ví dụ SAI: "explanation": "Từ "go" là động từ"
+- Ví dụ ĐÚNG: "explanation": "Từ 'go' là động từ"
+
+Cấu trúc JSON BẮT BUỘC (Không thừa không thiếu):
+[
+  {{
+    "question": "Nội dung câu hỏi?",
+    "options": ["A. Đáp án 1", "B. Đáp án 2", "C. Đáp án 3", "D. Đáp án 4"],
+    "correctIndex": 0,
+    "explanation": "Vì trong bài ghi rõ rằng..."
+  }}
+]
+
+VĂN BẢN BÀI HỌC CẦN RA ĐỀ:
+{clean_text}"""
+            }
+        ]        
+        response = await hf_client.chat_completion(
+            model="Qwen/Qwen3-32B",
+            messages=messages,
+            max_tokens=1000, # Tăng max_tokens một chút để đề phòng sinh 3 câu dài
+            temperature=0.15 # Tăng nhiệt độ lên 1 chút để AI có độ mượt khi tự quyết định số câu
+        )
+        
+        raw_text = response.choices[0].message.content.strip()
+        raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+        
+        start_idx = raw_text.find('[')
+        end_idx = raw_text.rfind(']')
+        
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            clean_json_string = raw_text[start_idx:end_idx+1]
+            clean_json_string = clean_json_string.replace('\n', ' ').replace('\r', '')
+            
+            # --- BỘ LỌC TỰ CHỮA LÀNH JSON (AUTO-HEALER) ---
+            # Quét và biến các dấu ngoặc kép "lưu manh" thành dấu nháy đơn '
+            chars = list(clean_json_string)
+            for i, c in enumerate(chars):
+                if c == '"':
+                    # Tìm ký tự có nghĩa liền trước
+                    prev_char = ''
+                    for j in range(i-1, -1, -1):
+                        if chars[j].strip():
+                            prev_char = chars[j]
+                            break
+                            
+                    # Tìm ký tự có nghĩa liền sau
+                    next_char = ''
+                    for j in range(i+1, len(chars)):
+                        if chars[j].strip():
+                            next_char = chars[j]
+                            break
+                    
+                    # Nếu ngoặc kép KHÔNG ĐỨNG CẠNH các dấu phẩy, hai chấm hay ngoặc nhọn của JSON
+                    # => Chắc chắn là ngoặc kép rác do AI tự chế -> Đổi thành nháy đơn
+                    if prev_char not in '{[:,[' and next_char not in '}]:,]':
+                        chars[i] = "'"
+            
+            clean_json_string = "".join(chars)
+            
+            try:
+                quiz_data = json.loads(clean_json_string)
+                return {"status": "success", "data": quiz_data}
+            except Exception as parse_err:
+                print("LỖI PARSE JSON:", str(parse_err))
+                print("CHUỖI BỊ LỖI:", clean_json_string)
+                return {"status": "error", "message": "AI sinh ra dữ liệu có chứa ký tự lạ làm hỏng JSON."}
+        else:
+            print("LỖI KHÔNG TÌM THẤY DẤU NGOẶC MẢNG:", raw_text)
+            return {"status": "error", "message": "Model không thể định dạng JSON hợp lệ."}
+    except Exception as e:
+        print("LỖI HỆ THỐNG KHI GENERATE QUIZ:", str(e))
         return {"status": "error", "message": str(e)}

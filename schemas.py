@@ -138,16 +138,6 @@ class BulkTuVungModel(BaseModel):
     id_giao_vien: int
     danh_sach_tu: List[TuVungModel]
 
-# =============================================================
-# MODEL DỮ LIỆU CHO API QUẢN LÝ TÀI LIỆU HỌC (NGỮ PHÁP)
-# =============================================================
-class TaiLieuHocModel(BaseModel):
-    id: Optional[int] = None
-    tieu_de: str
-    loai_tai_lieu: str 
-    tags: str          
-    noi_dung: str
-    file_goc: Optional[str] = None
 
 class LogViewRequest(BaseModel):
     id_hoc_sinh: int
@@ -161,3 +151,25 @@ class SaveAITestRequest(BaseModel):
 class PracticeAudioRequest(BaseModel):
     part: str
     questions: List[Any]
+
+# =============================================================
+# MODEL DỮ LIỆU CHO API QUẢN LÝ TÀI LIỆU HỌC (NGỮ PHÁP)
+# =============================================================
+class GenerateQuizRequest(BaseModel):
+    noi_dung: str
+    so_luong: str = "2-3"
+
+class StudentLogRequest(BaseModel):
+    id_hoc_sinh: int
+    id_tai_lieu: int
+    trang_thai: str # Nhận 2 giá trị: "start" hoặc "completed"
+
+class TaiLieuHocModel(BaseModel):
+    id: Optional[int] = None
+    tieu_de: str
+    loai_tai_lieu: str 
+    tags: str          
+    noi_dung: str
+    file_goc: Optional[str] = None
+    id_nguoi_tao: int = None
+    bai_tap_json: Optional[str] = None

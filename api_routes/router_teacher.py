@@ -9,6 +9,7 @@ import random
 import re
 import os
 import uuid 
+import base64
 from prompts import TOEIC_CONFIG
 import google.generativeai as genai
 import pymupdf as fitz
@@ -893,18 +894,34 @@ async def extract_document_ai(file: UploadFile = File(...)):
                             raw_html += f'<div style="text-align:center; margin:15px 0;"><img src="{img_url}" style="max-width:100%; border-radius:8px;"></div>\n'
             doc.close()
 
-        # 3. RÃ ẢNH LẤY CHỮ
+# 3. RÃ ẢNH LẤY CHỮ BẰNG QWEN VISION
         elif file_ext in ['.png', '.jpg', '.jpeg']:
-            model = genai.GenerativeModel('gemini-3.8-flash')
-            with open(saved_filepath, "rb") as f:
-                image_parts = [{"mime_type": file.content_type, "data": f.read()}]
-            response = await model.generate_content_async([
-                image_parts[0], 
-                "OCR chính xác 100% nội dung chữ trong ảnh, định dạng HTML cơ bản. Không tự sáng tác thêm."
-            ])
-            raw_html = response.text.replace("```html", "").replace("```", "").strip()
+            with open(saved_filepath, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+                
+            mime_type = file.content_type if hasattr(file, 'content_type') and file.content_type else "image/jpeg"
+            image_data_url = f"data:{mime_type};base64,{encoded_string}"
+
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "OCR chính xác 100% nội dung chữ trong ảnh, định dạng HTML cơ bản. Không tự sáng tác thêm."},
+                        {"type": "image_url", "image_url": {"url": image_data_url}}
+                    ]
+                }
+            ]
+
+            response = await hf_client.chat_completion(
+                model="Qwen/Qwen3-VL-30B-A3B-Instruct",
+                messages=messages,
+                max_tokens=5000,
+                temperature=0.1
+            )
+            raw_html = response.choices[0].message.content.replace("```html", "").replace("```", "").strip()
         else:
             return {"status": "error", "message": "Chỉ hỗ trợ PDF hoặc Hình ảnh."}
+
 
 # 4. AI LÀM ĐẸP (POLISH) TRƯỚC KHI TRẢ VỀ DÙNG QWEN3-14B
         if raw_html:

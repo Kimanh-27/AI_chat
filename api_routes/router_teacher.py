@@ -9,7 +9,6 @@ import random
 import re
 import os
 import uuid 
-import base64
 from prompts import TOEIC_CONFIG
 import google.generativeai as genai
 import pymupdf as fitz
@@ -349,19 +348,23 @@ async def evaluate_student_performance(id_hoc_sinh: int):
         model_name = "Qwen/Qwen3-32B"
         
         if not weak_parts:
-            prompt = """Bạn là chuyên gia phân tích Giáo dục. Học sinh này có tất cả các kỹ năng đều đạt trên 50%, biểu hiện rất xuất sắc.
+            prompt = """Học sinh này có tất cả các kỹ năng đều đạt trên 50%, biểu hiện rất xuất sắc.
 YÊU CẦU BÁO CÁO CHO GIÁO VIÊN:
 Hãy viết 1 đoạn ngắn (khoảng 2 câu) báo cáo cho giáo viên, đánh giá học sinh có phong độ đồng đều. 
 TUYỆT ĐỐI KHÔNG dùng các từ ngữ chào hỏi/thư từ như "Kính gửi", "Thưa", "Chào", "Báo cáo phân tích...". Đi thẳng trực tiếp vào câu đánh giá. KHÔNG xưng hô với học sinh."""
             
-            # Sử dụng text_generation trả về chuỗi trực tiếp, giống hệt cách Gemini hoạt động
-            response = await hf_client.text_generation(prompt, model=model_name, max_new_tokens=1000)
-            nhan_xet = response.strip()
+            # Khai báo chuẩn system/user để Qwen không báo None
+            messages = [
+                {"role": "system", "content": "Bạn là chuyên gia phân tích Giáo dục."},
+                {"role": "user", "content": prompt}
+            ]
+            response = await hf_client.chat_completion(messages=messages, model=model_name, max_tokens=1000)
+            nhan_xet = str(response.choices[0].message.content).strip()
             focus_topic_text = "Tiếp tục phát huy phong độ"
             
         else:
             weak_list_str = ", ".join([p['label'] for p in weak_parts])
-            prompt = f"""Bạn là chuyên gia phân tích Giáo dục. Học sinh đang yếu các phần: {weak_list_str} (dưới 50%).
+            prompt = f"""Học sinh đang yếu các phần: {weak_list_str} (dưới 50%).
 Dưới đây là NỘI DUNG THỰC TẾ các câu hỏi học sinh đã làm sai:
 {wrong_questions_text if wrong_questions_text else "Không có dữ liệu câu hỏi chi tiết."}
     
@@ -372,13 +375,20 @@ YÊU CẦU BÁO CÁO CHO GIÁO VIÊN:
 4. Hành văn KHÁCH QUAN.
 5. LỆNH CẤM BẮT BUỘC: TUYỆT ĐỐI KHÔNG dùng các từ ngữ chào hỏi/thư từ như "Kính gửi", "Thưa", "Chào", "Báo cáo phân tích...". Bắt đầu ngay lập tức bằng gạch đầu dòng đầu tiên."""
             
-            # Đổi sang text_generation, cấp 1500 tokens để Qwen xả hết báo cáo gạch đầu dòng
-            response = await hf_client.text_generation(prompt, model=model_name, max_new_tokens=1500)
-            nhan_xet = response.strip()
+            messages = [
+                {"role": "system", "content": "Bạn là chuyên gia phân tích Giáo dục."},
+                {"role": "user", "content": prompt}
+            ]
+            response = await hf_client.chat_completion(messages=messages, model=model_name, max_tokens=1500)
+            nhan_xet = str(response.choices[0].message.content).strip()
 
             focus_prompt = f"Dựa vào báo cáo này: '{nhan_xet}', hãy tóm tắt nội dung kiến thức cần luyện tập thành 1 câu ngắn gọn (VD: 'Từ vựng công sở và thì hoàn thành'). Không giải thích thêm."
-            focus_response = await hf_client.text_generation(focus_prompt, model=model_name, max_new_tokens=200)
-            focus_topic_text = focus_response.strip().replace('"', '')
+            focus_messages = [
+                {"role": "system", "content": "Bạn là chuyên gia tóm tắt."},
+                {"role": "user", "content": focus_prompt}
+            ]
+            focus_response = await hf_client.chat_completion(messages=focus_messages, model=model_name, max_tokens=200)
+            focus_topic_text = str(focus_response.choices[0].message.content).strip().replace('"', '')
 
         return {
             "status": "success",
@@ -893,34 +903,18 @@ async def extract_document_ai(file: UploadFile = File(...)):
                             raw_html += f'<div style="text-align:center; margin:15px 0;"><img src="{img_url}" style="max-width:100%; border-radius:8px;"></div>\n'
             doc.close()
 
-# 3. RÃ ẢNH LẤY CHỮ BẰNG QWEN VISION
+        # 3. RÃ ẢNH LẤY CHỮ
         elif file_ext in ['.png', '.jpg', '.jpeg']:
-            with open(saved_filepath, "rb") as image_file:
-                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
-                
-            mime_type = file.content_type if hasattr(file, 'content_type') and file.content_type else "image/jpeg"
-            image_data_url = f"data:{mime_type};base64,{encoded_string}"
-
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "OCR chính xác 100% nội dung chữ trong ảnh, định dạng HTML cơ bản. Không tự sáng tác thêm."},
-                        {"type": "image_url", "image_url": {"url": image_data_url}}
-                    ]
-                }
-            ]
-
-            response = await hf_client.chat_completion(
-                model="Qwen/Qwen3-VL-30B-A3B-Instruct",
-                messages=messages,
-                max_tokens=5000,
-                temperature=0.1
-            )
-            raw_html = response.choices[0].message.content.replace("```html", "").replace("```", "").strip()
+            model = genai.GenerativeModel('gemini-3.8-flash')
+            with open(saved_filepath, "rb") as f:
+                image_parts = [{"mime_type": file.content_type, "data": f.read()}]
+            response = await model.generate_content_async([
+                image_parts[0], 
+                "OCR chính xác 100% nội dung chữ trong ảnh, định dạng HTML cơ bản. Không tự sáng tác thêm."
+            ])
+            raw_html = response.text.replace("```html", "").replace("```", "").strip()
         else:
             return {"status": "error", "message": "Chỉ hỗ trợ PDF hoặc Hình ảnh."}
-
 
 # 4. AI LÀM ĐẸP (POLISH) TRƯỚC KHI TRẢ VỀ DÙNG QWEN3-14B
         if raw_html:

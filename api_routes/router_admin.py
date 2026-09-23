@@ -1045,7 +1045,6 @@ async def extract_document_ai(file: UploadFile = File(...)):
 # 3. RÃ ẢNH LẤY CHỮ BẰNG QWEN VISION
         elif file_ext in ['.png', '.jpg', '.jpeg']:
             with open(saved_filepath, "rb") as image_file:
-                # Mã hóa ảnh sang base64 để đẩy qua API Hugging Face
                 encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
                 
             mime_type = file.content_type if hasattr(file, 'content_type') and file.content_type else "image/jpeg"
@@ -1061,7 +1060,6 @@ async def extract_document_ai(file: UploadFile = File(...)):
                 }
             ]
 
-            # Sử dụng đúng model Vision Kim Anh yêu cầu
             response = await hf_client.chat_completion(
                 model="Qwen/Qwen3-VL-30B-A3B-Instruct",
                 messages=messages,

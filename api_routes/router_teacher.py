@@ -354,9 +354,9 @@ YÊU CẦU BÁO CÁO CHO GIÁO VIÊN:
 Hãy viết 1 đoạn ngắn (khoảng 2 câu) báo cáo cho giáo viên, đánh giá học sinh có phong độ đồng đều. 
 TUYỆT ĐỐI KHÔNG dùng các từ ngữ chào hỏi/thư từ như "Kính gửi", "Thưa", "Chào", "Báo cáo phân tích...". Đi thẳng trực tiếp vào câu đánh giá. KHÔNG xưng hô với học sinh."""
             
-            messages = [{"role": "user", "content": prompt}]
-            response = await hf_client.chat_completion(messages=messages, model=model_name, max_tokens=1000)
-            nhan_xet = response.choices[0].message.content.strip()
+            # Sử dụng text_generation trả về chuỗi trực tiếp, giống hệt cách Gemini hoạt động
+            response = await hf_client.text_generation(prompt, model=model_name, max_new_tokens=1000)
+            nhan_xet = response.strip()
             focus_topic_text = "Tiếp tục phát huy phong độ"
             
         else:
@@ -372,14 +372,13 @@ YÊU CẦU BÁO CÁO CHO GIÁO VIÊN:
 4. Hành văn KHÁCH QUAN.
 5. LỆNH CẤM BẮT BUỘC: TUYỆT ĐỐI KHÔNG dùng các từ ngữ chào hỏi/thư từ như "Kính gửi", "Thưa", "Chào", "Báo cáo phân tích...". Bắt đầu ngay lập tức bằng gạch đầu dòng đầu tiên."""
             
-            messages = [{"role": "user", "content": prompt}]
-            response = await hf_client.chat_completion(messages=messages, model=model_name, max_tokens=1500)
-            nhan_xet = response.choices[0].message.content.strip()
+            # Đổi sang text_generation, cấp 1500 tokens để Qwen xả hết báo cáo gạch đầu dòng
+            response = await hf_client.text_generation(prompt, model=model_name, max_new_tokens=1500)
+            nhan_xet = response.strip()
 
             focus_prompt = f"Dựa vào báo cáo này: '{nhan_xet}', hãy tóm tắt nội dung kiến thức cần luyện tập thành 1 câu ngắn gọn (VD: 'Từ vựng công sở và thì hoàn thành'). Không giải thích thêm."
-            focus_messages = [{"role": "user", "content": focus_prompt}]
-            focus_response = await hf_client.chat_completion(messages=focus_messages, model=model_name, max_tokens=200)
-            focus_topic_text = focus_response.choices[0].message.content.strip().replace('"', '')
+            focus_response = await hf_client.text_generation(focus_prompt, model=model_name, max_new_tokens=200)
+            focus_topic_text = focus_response.strip().replace('"', '')
 
         return {
             "status": "success",

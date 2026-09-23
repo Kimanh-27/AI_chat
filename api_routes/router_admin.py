@@ -564,7 +564,7 @@ async def delete_account(acc_id: int, id_admin: int = Query(0)):
         return {"status": "error", "message": str(e)}
 
 @router.post("/reset-password/{acc_id}")
-async def reset_password(acc_id: int, id_admin: int = Query(0)):
+async def reset_password(acc_id: int, id_nguoi_dung: int = Query(0), vai_tro: str = Query("admin")):
     try:
         db = get_db_connection()
         cursor = db.cursor()
@@ -577,7 +577,10 @@ async def reset_password(acc_id: int, id_admin: int = Query(0)):
         
         # --- LƯU NHẬT KÝ ---
         chi_tiet_log = f"Đã khôi phục mật khẩu mặc định (123456) cho tài khoản ID: #{acc_id}"
-        cursor.execute("INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, 'admin', 'QUAN_LY_TAI_KHOAN', %s)", (id_admin, chi_tiet_log))
+        cursor.execute(
+            "INSERT INTO nhat_ky_hoat_dong (id_tai_khoan, vai_tro, loai_hanh_dong, chi_tiet) VALUES (%s, %s, 'QUAN_LY_TAI_KHOAN', %s)", 
+            (id_nguoi_dung, vai_tro, chi_tiet_log)
+        )
 
         db.commit()
         db.close()

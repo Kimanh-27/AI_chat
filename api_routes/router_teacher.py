@@ -460,32 +460,57 @@ async def generate_remedial(part: str = Form(...), num_items: int = Form(...), f
             return {"status": "error", "message": "Không tìm thấy cấu hình cho Part này."}
 
         system_prompt = config["system_prompt"].replace("{num_questions}", str(num_items))
-        remedial_rule = f"[MỤC TIÊU KHẮC PHỤC LỖ HỔNG KIẾN THỨC BẮT BUỘC]: Hãy sinh đề tập trung hoàn toàn vào mảng bối cảnh/ngữ pháp/từ vựng sau đây: '{focus_topic}'. CHỈ TRẢ VỀ ĐÚNG MỘT ĐỊNH DẠNG JSON, KHÔNG GIẢI THÍCH GÌ THÊM."
-
-        model_name = "Qwen/Qwen3-32B"
         
+        remedial_rule = f"""
+[MỤC TIÊU KHẮC PHỤC LỖ HỔNG KIẾN THỨC]: Hãy sinh đề tập trung hoàn toàn vào mảng bối cảnh/ngữ pháp/từ vựng sau đây: '{focus_topic}'.
+
+[3 LUẬT SINH TỒN BẮT BUỘC]:
+1. CHỈ TRẢ VỀ ĐÚNG MỘT ĐỊNH DẠNG JSON. Bắt buộc phải có dấu phẩy `,` ngăn cách các thuộc tính. Cẩn thận dấu ngoặc kép.
+2. TUYỆT ĐỐI KHÔNG ĐƯỢC để trống trường `giai_thich`.
+3. Trong các phần hội thoại (script/doan_van), BẮT BUỘC dùng ký tự `\\n\\n` để xuống dòng phân cách nhân vật.
+"""
+        
+        model_name = "Qwen/Qwen3-32B"
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": remedial_rule}
         ]
         
-        response = await hf_client.chat_completion(
-            messages=messages, 
-            model=model_name, 
-            max_tokens=2500
-        )
+        # --- CƠ CHẾ AUTO-RETRY (TỰ PHỤC HỒI) ---
+        max_retries = 3
+        last_error_msg = ""
         
-        # Lấy nội dung và "bào" sạch các markdown thừa của AI
-        raw_text = str(response.choices[0].message.content).strip()
-        raw_text = raw_text.replace("```json", "").replace("```", "")
+        for attempt in range(max_retries):
+            try:
+                response = await hf_client.chat_completion(
+                    messages=messages, 
+                    model=model_name, 
+                    max_tokens=2500
+                )
+                
+                raw_text = str(response.choices[0].message.content).strip()
+                raw_text = raw_text.replace("```json", "").replace("```", "")
+                
+                match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
+                if match:
+                    clean_json = match.group(1)
+                    parsed_data = json.loads(clean_json)
+                    
+                    return {"status": "success", "data": parsed_data}
+                else:
+                    raise ValueError("AI trả về text không chứa JSON.")
+                    
+            except json.JSONDecodeError as je:
+                last_error_msg = str(je)
+                print(f"[NOVA AUTO-RETRY] Lần {attempt + 1} thất bại do JSONDecodeError. Đang ép chạy lại...")
+                continue 
+            except Exception as ex:
+                last_error_msg = str(ex)
+                print(f"[NOVA AUTO-RETRY] Lần {attempt + 1} thất bại. Lỗi: {ex}")
+                continue
+                
+        return {"status": "error", "message": f"Nova đã tự động phục hồi 3 lần nhưng AI vẫn sinh lỗi cấu trúc dữ liệu. Lỗi cuối: {last_error_msg}"}
         
-        match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
-        if match:
-            clean_json = match.group(1)
-            parsed_data = json.loads(clean_json)
-            return {"status": "success", "data": parsed_data}
-        else:
-            return {"status": "error", "message": "Nova không tạo ra được cấu trúc đề thi khắc phục lỗi."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

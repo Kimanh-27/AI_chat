@@ -460,18 +460,24 @@ async def generate_remedial(part: str = Form(...), num_items: int = Form(...), f
             return {"status": "error", "message": "Không tìm thấy cấu hình cho Part này."}
 
         system_prompt = config["system_prompt"].replace("{num_questions}", str(num_items))
-        remedial_rule = f"\n\n[MỤC TIÊU KHẮC PHỤC LỖ HỔNG KIẾN THỨC BẮT BUỘC]: Hãy sinh đề tập trung hoàn toàn vào mảng bối cảnh/ngữ pháp/từ vựng sau đây: '{focus_topic}'."
-        final_prompt = system_prompt + remedial_rule
+        remedial_rule = f"[MỤC TIÊU KHẮC PHỤC LỖ HỔNG KIẾN THỨC BẮT BUỘC]: Hãy sinh đề tập trung hoàn toàn vào mảng bối cảnh/ngữ pháp/từ vựng sau đây: '{focus_topic}'. CHỈ TRẢ VỀ ĐÚNG MỘT ĐỊNH DẠNG JSON, KHÔNG GIẢI THÍCH GÌ THÊM."
 
         model_name = "Qwen/Qwen3-32B"
-        messages = [{"role": "user", "content": final_prompt}]
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": remedial_rule}
+        ]
         
         response = await hf_client.chat_completion(
             messages=messages, 
             model=model_name, 
             max_tokens=2500
         )
-        raw_text = response.choices[0].message.content.strip()
+        
+        # Lấy nội dung và "bào" sạch các markdown thừa của AI
+        raw_text = str(response.choices[0].message.content).strip()
+        raw_text = raw_text.replace("```json", "").replace("```", "")
         
         match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
         if match:

@@ -464,10 +464,11 @@ async def generate_remedial(part: str = Form(...), num_items: int = Form(...), f
         remedial_rule = f"""
 [MỤC TIÊU KHẮC PHỤC LỖ HỔNG KIẾN THỨC]: Hãy sinh đề tập trung hoàn toàn vào mảng bối cảnh/ngữ pháp/từ vựng sau đây: '{focus_topic}'.
 
-[3 LUẬT SINH TỒN BẮT BUỘC]:
-1. CHỈ TRẢ VỀ ĐÚNG MỘT ĐỊNH DẠNG JSON. Bắt buộc phải có dấu phẩy `,` ngăn cách các thuộc tính. Cẩn thận dấu ngoặc kép.
-2. TUYỆT ĐỐI KHÔNG ĐƯỢC để trống trường `giai_thich`.
-3. Trong các phần hội thoại (script/doan_van), BẮT BUỘC dùng ký tự `\\n\\n` để xuống dòng phân cách nhân vật.
+[4 LUẬT SINH TỒN BẮT BUỘC ĐỂ KHÔNG BỊ CRASH JSON]:
+1. CHỈ TRẢ VỀ ĐÚNG MỘT ĐỊNH DẠNG JSON. Bắt buộc phải có dấu phẩy `,` ngăn cách các thuộc tính.
+2. LUẬT DẤU CÂU SINH TỬ: CẤM SỬ DỤNG DẤU NGOẶC KÉP (") BÊN TRONG CÁC GIÁ TRỊ TEXT (như nội dung câu hỏi, đáp án, đoạn văn, giải thích). Nếu cần trích dẫn lời nói, BẮT BUỘC DÙNG DẤU NHÁY ĐƠN ('). Ví dụ sai: "cau_hoi": "She said "Hi"". Ví dụ ĐÚNG: "cau_hoi": "She said 'Hi'".
+3. TUYỆT ĐỐI KHÔNG ĐƯỢC để trống trường `giai_thich`. Mọi câu đều phải có lời giải thích.
+4. Đối với đoạn văn/hội thoại, bắt buộc dùng `\\n\\n` để xuống dòng phân tách.
 """
         
         model_name = "Qwen/Qwen3-32B"
@@ -476,7 +477,6 @@ async def generate_remedial(part: str = Form(...), num_items: int = Form(...), f
             {"role": "user", "content": remedial_rule}
         ]
         
-        # --- CƠ CHẾ AUTO-RETRY (TỰ PHỤC HỒI) ---
         max_retries = 3
         last_error_msg = ""
         
@@ -489,20 +489,21 @@ async def generate_remedial(part: str = Form(...), num_items: int = Form(...), f
                 )
                 
                 raw_text = str(response.choices[0].message.content).strip()
-                raw_text = raw_text.replace("```json", "").replace("```", "")
+                
+                raw_text = re.sub(r"^```(json)?\s*", "", raw_text, flags=re.IGNORECASE)
+                raw_text = re.sub(r"\s*```$", "", raw_text)
                 
                 match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
                 if match:
                     clean_json = match.group(1)
                     parsed_data = json.loads(clean_json)
-                    
                     return {"status": "success", "data": parsed_data}
                 else:
-                    raise ValueError("AI trả về text không chứa JSON.")
+                    raise ValueError("AI trả về text không chứa mảng/đối tượng JSON.")
                     
             except json.JSONDecodeError as je:
-                last_error_msg = str(je)
-                print(f"[NOVA AUTO-RETRY] Lần {attempt + 1} thất bại do JSONDecodeError. Đang ép chạy lại...")
+                last_error_msg = f"{str(je)}"
+                print(f"[NOVA AUTO-RETRY] Lần {attempt + 1} thất bại do sai cấu trúc JSON. Lỗi: {je}")
                 continue 
             except Exception as ex:
                 last_error_msg = str(ex)

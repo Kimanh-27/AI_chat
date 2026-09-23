@@ -81,7 +81,7 @@ YÊU CẦU QUAN TRỌNG VỀ ĐÁP ÁN (BẮT BUỘC):
 CẢNH BÁO NGHIÊM TRỌNG: KHÔNG ĐƯỢC QUÊN MẢNG "danh_sach_cau_hoi". BẠN PHẢI SÁNG TÁC ĐOẠN VĂN MỚI THEO KHUNG JSON DƯỚI ĐÂY:
 [
   {
-    "doan_van": "[Tự sáng tác đoạn hội thoại bằng tiếng Anh theo chủ đề, có tiền tố M:, W: cho từng người nói]",
+    "doan_van": "[Tự sáng tác đoạn hội thoại. BẮT BUỘC chèn ký tự \\n\\n để xuống dòng mỗi khi đổi người nói. Ví dụ: M: Hello.\\n\\nW: Hi there.]",
     "danh_sach_cau_hoi": [
       {
         "cau_hoi": "[Tự viết câu hỏi tiếng Anh số 1]",
@@ -205,22 +205,24 @@ CẢNH BÁO: KHÔNG ĐƯỢC SAO CHÉP. BẠN PHẢI TỰ SÁNG TÁC CÂU HỎI 
         "requires_image": False,
         "default_questions": 1,
         "system_prompt": """Bạn là chuyên gia ra đề TOEIC Part 6 (Text Completion) format mới nhất.
-Hãy sinh ra {num_questions} đoạn văn (Email, Memo, Article). Chèn CHÍNH XÁC 4 chỗ trống, đánh số (1), (2), (3), (4) vào trong đoạn văn.
-Đoạn văn BẮT BUỘC phải đi kèm mảng "danh_sach_cau_hoi" chứa ĐÚNG 4 câu hỏi tương ứng.
+Hãy sinh ra {num_questions} đoạn văn (Email, Memo, Article). 
+
+LUẬT SINH TỒN VỀ CHỖ TRỐNG (BẮT BUỘC): Bạn PHẢI chèn ĐẦY ĐỦ 4 chỗ trống vào trong đoạn văn, ký hiệu chính xác là: (1) _______, (2) _______, (3) _______, và (4) _______. TUYỆT ĐỐI KHÔNG ĐƯỢC BỎ QUÊN CHỖ TRỐNG SỐ 4.
 
 YÊU CẦU CHỦ ĐỀ: BẮT BUỘC viết đoạn văn về một trong các chủ đề sau: {random_topics}.
 
 YÊU CẦU ĐỘ KHÓ FORMAT MỚI (RẤT QUAN TRỌNG):
-Trong 4 câu hỏi của mỗi đoạn, BẮT BUỘC phải có 1 câu hỏi là ĐIỀN CẢ MỘT CÂU HOÀN CHỈNH vào chỗ trống (Sentence Insertion). 
+Câu hỏi số 4 BẮT BUỘC phải là dạng ĐIỀN CẢ MỘT CÂU HOÀN CHỈNH vào chỗ trống (Sentence Insertion). Vì vậy, chỗ trống (4) _______ trong đoạn văn phải được đặt ở vị trí hợp lý để nối mạch văn.
 
 YÊU CẦU ĐỊNH DẠNG (BẮT BUỘC):
-1. TRƯỜNG "cau_hoi" CHỈ ĐƯỢC CHỨA SỐ CỦA CHỖ TRỐNG ("(1) _______"). TUYỆT ĐỐI KHÔNG lặp lại câu văn. KHÔNG dùng chữ "Câu 1".
-2. Đáp án đúng ngẫu nhiên.
+1. TRƯỜNG "cau_hoi" CHỈ ĐƯỢC CHỨA KÝ HIỆU CHỖ TRỐNG (Ví dụ: "(1) _______"). TUYỆT ĐỐI KHÔNG lặp lại câu văn.
+2. TRƯỜNG "giai_thich" TUYỆT ĐỐI KHÔNG ĐƯỢC ĐỂ TRỐNG. Mọi câu đều phải có giải thích chi tiết.
+3. Đáp án đúng ngẫu nhiên.
 
-CẢNH BÁO NGHIÊM TRỌNG: BẠN PHẢI SÁNG TÁC ĐOẠN VĂN MỚI VÀ ĐIỀN ĐỦ 4 CÂU HỎI VÀO KHUNG SAU:
+CẢNH BÁO NGHIÊM TRỌNG: KIỂM TRA LẠI ĐOẠN VĂN XEM ĐÃ CÓ ĐỦ TỪ (1) ĐẾN (4) CHƯA TRƯỚC KHI TRẢ VỀ JSON:
 [
   {
-    "doan_van": "[Tự sáng tác đoạn văn tiếng Anh theo chủ đề, có chứa các khoảng trống (1) _______, (2) _______, (3) _______, (4) _______ ở các vị trí hợp lý]",
+    "doan_van": "[Tự sáng tác đoạn văn tiếng Anh theo chủ đề, CHẮC CHẮN PHẢI CHỨA CẢ 4 KÝ HIỆU (1) _______, (2) _______, (3) _______, (4) _______ ở các vị trí hợp lý]",
     "danh_sach_cau_hoi": [
       {
         "cau_hoi": "(1) _______", 
@@ -229,7 +231,7 @@ CẢNH BÁO NGHIÊM TRỌNG: BẠN PHẢI SÁNG TÁC ĐOẠN VĂN MỚI VÀ ĐI�
         "dap_an_c": "[Đáp án C]", 
         "dap_an_d": "[Đáp án D]",
         "dap_an_dung": "[A, B, C, D]",
-        "giai_thich": "[Giải thích chi tiết BẰNG TIẾNG VIỆT]",
+        "giai_thich": "[BẮT BUỘC CÓ: Giải thích chi tiết ngữ pháp/từ vựng BẰNG TIẾNG VIỆT]",
         "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
       },
       {
@@ -239,7 +241,7 @@ CẢNH BÁO NGHIÊM TRỌNG: BẠN PHẢI SÁNG TÁC ĐOẠN VĂN MỚI VÀ ĐI�
         "dap_an_c": "[Đáp án C]", 
         "dap_an_d": "[Đáp án D]",
         "dap_an_dung": "[A, B, C, D]",
-        "giai_thich": "[Giải thích chi tiết BẰNG TIẾNG VIỆT]",
+        "giai_thich": "[BẮT BUỘC CÓ: Giải thích chi tiết ngữ pháp/từ vựng BẰNG TIẾNG VIỆT]",
         "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
       },
       {
@@ -249,17 +251,17 @@ CẢNH BÁO NGHIÊM TRỌNG: BẠN PHẢI SÁNG TÁC ĐOẠN VĂN MỚI VÀ ĐI�
         "dap_an_c": "[Đáp án C]", 
         "dap_an_d": "[Đáp án D]",
         "dap_an_dung": "[A, B, C, D]",
-        "giai_thich": "[Giải thích chi tiết BẰNG TIẾNG VIỆT]",
+        "giai_thich": "[BẮT BUỘC CÓ: Giải thích chi tiết ngữ pháp/từ vựng BẰNG TIẾNG VIỆT]",
         "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
       },
       {
         "cau_hoi": "(4) _______", 
-        "dap_an_a": "[Đáp án A]", 
-        "dap_an_b": "[Đáp án B]", 
-        "dap_an_c": "[Đáp án C]", 
-        "dap_an_d": "[Đáp án D]",
+        "dap_an_a": "[CÂU HOÀN CHỈNH A]", 
+        "dap_an_b": "[CÂU HOÀN CHỈNH B]", 
+        "dap_an_c": "[CÂU HOÀN CHỈNH C]", 
+        "dap_an_d": "[CÂU HOÀN CHỈNH D]",
         "dap_an_dung": "[A, B, C, D]",
-        "giai_thich": "[Giải thích chi tiết BẰNG TIẾNG VIỆT]",
+        "giai_thich": "[BẮT BUỘC CÓ: Giải thích lý do chọn câu này BẰNG TIẾNG VIỆT]",
         "id_dang_bai": "[Chỉ ghi số ID tương ứng từ Menu dạng bài]"
       }
     ]

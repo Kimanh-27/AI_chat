@@ -1,15 +1,18 @@
 from fastapi import APIRouter, Query, HTTPException
 from database import get_db_connection
 from schemas import HistoryData, IIGSubmitData,LogViewRequest
+from dotenv import load_dotenv
+from huggingface_hub import AsyncInferenceClient
 import json
 import re
 import os
 import random
 import google.generativeai as genai
 
-genai.configure(api_key=os.getenv("HUGGING_FACE_API_KEY"))
 router = APIRouter()
-
+load_dotenv()
+HF_TOKEN = os.getenv("HUGGING_FACE_API_KEY")
+hf_client = AsyncInferenceClient(api_key=HF_TOKEN)
 
 #=============================================================
 #===      HỌC SINH NHẬN BÀI TẬP ĐƯỢC GIAO     ================
@@ -501,8 +504,7 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
 
         vocab_context = "\n".join([f"- {v['tu']}: {v['nghia']}" for v in vocab_list])
 
-        prompt = f"""
-        Bạn là Nova, một hệ thống AI tạo đề thi trắc nghiệm TOEIC.
+        user_prompt = f"""
         Tôi có danh sách từ vựng sau:
         {vocab_context}
 
@@ -524,11 +526,20 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
         - Cấu trúc ví dụ CHUẨN: {{"type": "Chọn nghĩa đúng của từ sau:", "question": "Daughter", "options": ["Con gái", "Con trai", "Bố", "Mẹ"], "answerIndex": 0}}
         """
 
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        # ĐÃ SỬA: Đổi sang gọi AI bất đồng bộ (async) để server không bị nghẽn
-        response = await model.generate_content_async(prompt) 
+        messages = [
+            {"role": "system", "content": "Bạn là Nova, một hệ thống AI tạo đề thi trắc nghiệm TOEIC. Chỉ trả về duy nhất định dạng JSON Array, không kèm lời giải thích."},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        model_name = "Qwen/Qwen3-32B"
+        response = await hf_client.chat_completion(
+            messages=messages, 
+            model=model_name, 
+            max_tokens=2000, 
+            temperature=0.3
+        )
         
-        raw_text = response.text.strip()
+        raw_text = response.choices[0].message.content.strip()
         raw_text = re.sub(r"^```(json)?\s*", "", raw_text, flags=re.IGNORECASE)
         raw_text = re.sub(r"\s*```$", "", raw_text)
 
@@ -553,7 +564,7 @@ async def generate_quiz(topic_id: int, limit: int = Query(10, le=20)):
             "status": "error", 
             "message": "Đã xảy ra lỗi nghiêm trọng trong quá trình tạo đề."
         }
-    
+ 
 
 @router.get("/generate-matching")
 async def generate_matching(topic_id: int, limit: int = Query(5, le=15)):
@@ -570,8 +581,7 @@ async def generate_matching(topic_id: int, limit: int = Query(5, le=15)):
         vocab_list = [f"{row['tu']} ({row['nghia']})" for row in rows]
         vocab_context = ", ".join(vocab_list)
 
-        prompt = f"""
-        Bạn là Nova, hệ thống AI tạo bài tập TOEIC.
+        user_prompt = f"""
         Dữ liệu:
         {vocab_context}
 
@@ -584,10 +594,23 @@ async def generate_matching(topic_id: int, limit: int = Query(5, le=15)):
         ]
         """
 
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = await model.generate_content_async(prompt)
+        messages = [
+            {"role": "system", "content": "Bạn là Nova, hệ thống AI tạo bài tập TOEIC. Chỉ trả về JSON hợp lệ."},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        model_name = "Qwen/Qwen3-32B"
+        response = await hf_client.chat_completion(
+            messages=messages, 
+            model=model_name, 
+            max_tokens=1000, 
+            temperature=0.4
+        )
         
-        cleaned_text = response.text.replace("```json", "").replace("```", "").strip()
+        raw_text = response.choices[0].message.content.strip()
+        cleaned_text = re.sub(r"^```(json)?\s*", "", raw_text, flags=re.IGNORECASE)
+        cleaned_text = re.sub(r"\s*```$", "", cleaned_text)
+        
         data = json.loads(cleaned_text)
 
         return {"status": "success", "data": data}

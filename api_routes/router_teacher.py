@@ -345,21 +345,21 @@ async def evaluate_student_performance(id_hoc_sinh: int):
 
         db.close()
 
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        # Cấu hình model Hugging Face
+        model_name = "Qwen/Qwen3-32B" 
         
         if not weak_parts:
-            prompt = """Bạn là chuyên gia phân tích Giáo dục. Học sinh này có tất cả các kỹ năng đều đạt trên 50%, biểu hiện rất xuất sắc.
-YÊU CẦU BÁO CÁO CHO GIÁO VIÊN:
-Hãy viết 1 đoạn ngắn (khoảng 2 câu) báo cáo cho giáo viên, đánh giá học sinh có phong độ đồng đều. 
-TUYỆT ĐỐI KHÔNG dùng các từ ngữ chào hỏi/thư từ như "Kính gửi", "Thưa", "Chào", "Báo cáo phân tích...". Đi thẳng trực tiếp vào câu đánh giá. KHÔNG xưng hô với học sinh."""
-            
-            response = await model.generate_content_async(prompt)
-            nhan_xet = response.text.strip()
+            messages = [
+                {"role": "system", "content": "Bạn là chuyên gia phân tích Giáo dục."},
+                {"role": "user", "content": "Học sinh này có tất cả các kỹ năng đều đạt trên 50%, biểu hiện rất xuất sắc.\nYÊU CẦU BÁO CÁO CHO GIÁO VIÊN:\nHãy viết 1 đoạn ngắn (khoảng 2 câu) báo cáo cho giáo viên, đánh giá học sinh có phong độ đồng đều. \nTUYỆT ĐỐI KHÔNG dùng các từ ngữ chào hỏi/thư từ như 'Kính gửi', 'Thưa', 'Chào', 'Báo cáo phân tích...'. Đi thẳng trực tiếp vào câu đánh giá. KHÔNG xưng hô với học sinh."}
+            ]
+            response = await hf_client.chat_completion(messages=messages, model=model_name, max_tokens=200, temperature=0.3)
+            nhan_xet = response.choices[0].message.content.strip()
             focus_topic_text = "Tiếp tục phát huy phong độ"
             
         else:
             weak_list_str = ", ".join([p['label'] for p in weak_parts])
-            prompt = f"""Bạn là chuyên gia phân tích Giáo dục. Học sinh đang yếu các phần: {weak_list_str} (dưới 50%).
+            user_prompt = f"""Học sinh đang yếu các phần: {weak_list_str} (dưới 50%).
 Dưới đây là NỘI DUNG THỰC TẾ các câu hỏi học sinh đã làm sai:
 {wrong_questions_text if wrong_questions_text else "Không có dữ liệu câu hỏi chi tiết."}
     
@@ -368,14 +368,21 @@ YÊU CẦU BÁO CÁO CHO GIÁO VIÊN:
 2. Trình bày dưới dạng CÁC GẠCH ĐẦU DÒNG (dùng dấu -). Mỗi gạch đầu dòng là một vấn đề cụ thể, ngắn gọn.
 3. TUYỆT ĐỐI KHÔNG viết thành 1 đoạn văn dài liền mạch.
 4. Hành văn KHÁCH QUAN.
-5. LỆNH CẤM BẮT BUỘC: TUYỆT ĐỐI KHÔNG dùng các từ ngữ chào hỏi/thư từ như "Kính gửi", "Thưa", "Chào", "Báo cáo phân tích...". Bắt đầu ngay lập tức bằng gạch đầu dòng đầu tiên."""
+5. LỆNH CẤM BẮT BUỘC: TUYỆT ĐỐI KHÔNG dùng các từ ngữ chào hỏi/thư từ như 'Kính gửi', 'Thưa', 'Chào', 'Báo cáo phân tích...'. Bắt đầu ngay lập tức bằng gạch đầu dòng đầu tiên."""
             
-            response = await model.generate_content_async(prompt)
-            nhan_xet = response.text.strip()
+            messages = [
+                {"role": "system", "content": "Bạn là chuyên gia phân tích Giáo dục."},
+                {"role": "user", "content": user_prompt}
+            ]
+            response = await hf_client.chat_completion(messages=messages, model=model_name, max_tokens=400, temperature=0.2)
+            nhan_xet = response.choices[0].message.content.strip()
 
-            focus_prompt = f"Dựa vào báo cáo này: '{nhan_xet}', hãy tóm tắt nội dung kiến thức cần luyện tập thành 1 câu ngắn gọn (VD: 'Từ vựng công sở và thì hoàn thành'). Không giải thích thêm."
-            focus_response = await model.generate_content_async(focus_prompt)
-            focus_topic_text = focus_response.text.strip().replace('"', '')
+            focus_messages = [
+                {"role": "system", "content": "Bạn là trợ lý trích xuất từ khóa."},
+                {"role": "user", "content": f"Dựa vào báo cáo này: '{nhan_xet}', hãy tóm tắt nội dung kiến thức cần luyện tập thành 1 câu ngắn gọn (VD: 'Từ vựng công sở và thì hoàn thành'). Không giải thích thêm."}
+            ]
+            focus_response = await hf_client.chat_completion(messages=focus_messages, model=model_name, max_tokens=50, temperature=0.1)
+            focus_topic_text = focus_response.choices[0].message.content.strip().replace('"', '')
 
         return {
             "status": "success",
@@ -447,15 +454,22 @@ async def generate_remedial(part: str = Form(...), num_items: int = Form(...), f
             return {"status": "error", "message": "Không tìm thấy cấu hình cho Part này."}
 
         system_prompt = config["system_prompt"].replace("{num_questions}", str(num_items))
-        remedial_rule = f"\n\n[MỤC TIÊU KHẮC PHỤC LỖ HỔNG KIẾN THỨC BẮT BUỘC]: Hãy sinh đề tập trung hoàn toàn vào mảng bối cảnh/ngữ pháp/từ vựng sau đây: '{focus_topic}'."
-        final_prompt = system_prompt + remedial_rule
+        remedial_rule = f"\n\n[MỤC TIÊU KHẮC PHỤC LỖ HỔNG KIẾN THỨC BẮT BUỘC]: Hãy sinh đề tập trung hoàn toàn vào mảng bối cảnh/ngữ pháp/từ vựng sau đây: '{focus_topic}'. Chỉ trả về duy nhất định dạng JSON hợp lệ."
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": remedial_rule}
+        ]
 
-        model = genai.GenerativeModel(
-                'gemini-2.5-flash',
-                generation_config={"response_mime_type": "application/json"}
-            )
-        response = await model.generate_content_async(final_prompt)
-        raw_text = response.text.strip()
+        model_name = "Qwen/Qwen3-32B"
+        response = await hf_client.chat_completion(
+            messages=messages, 
+            model=model_name, 
+            max_tokens=2500, 
+            temperature=0.3
+        )
+        
+        raw_text = response.choices[0].message.content.strip()
         
         match = re.search(r'(\[.*\]|\{.*\})', raw_text, re.DOTALL)
         if match:

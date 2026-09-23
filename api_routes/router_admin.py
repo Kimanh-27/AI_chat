@@ -1053,18 +1053,22 @@ async def extract_document_ai(file: UploadFile = File(...)):
             messages = [
                 {
                     "role": "system",
-                    "content": "Bạn là chuyên gia thiết kế web. Nhiệm vụ của bạn là cấu trúc lại HTML thô thành bài giảng đẹp mắt (Dùng <h3>, <ul>, <li>, in đậm). LỆNH BẮT BUỘC: Chỉ trả về mã HTML sạch. TUYỆT ĐỐI GIỮ NGUYÊN 100% các thẻ <img src=\"...\"> và vị trí của chúng. Không tự sáng tác thêm."
+                    "content": """Bạn là chuyên gia thiết kế bài giảng web. Hãy cấu trúc lại văn bản thô.
+LỆNH TỐI THƯỢNG ĐỂ CHỐNG LỖI CẮT CỤT (CUT-OFF):
+1. GIẢM THIỂU THẺ HTML. CẤM vẽ bảng (<table>) cho các nội dung dài. Hãy chuyển đổi các đoạn so sánh thành mục gạch đầu dòng (<ul> <li>) hoặc in đậm tiêu đề (<b>) để tiết kiệm bộ nhớ.
+2. TUYỆT ĐỐI KHÔNG TÓM TẮT. Phải xử lý và xuất ra toàn bộ nội dung đến chữ cuối cùng.
+3. KHÔNG dùng CSS nội tuyến (style="..."). Chỉ trả về mã HTML sạch."""
                 },
                 {
                     "role": "user",
-                    "content": f"[HTML THÔ CẦN XỬ LÝ]\n{raw_html}"
+                    "content": f"[NỘI DUNG CẦN CẤU TRÚC LẠI]\n{raw_html}"
                 }
             ]
             
             response = await hf_client.chat_completion(
                 model="Qwen/Qwen3-14B",
                 messages=messages,
-                max_tokens=2500,
+                max_tokens=5000,
                 temperature=0.1 # Để nhiệt độ thấp giúp định dạng HTML chuẩn xác hơn
             )
             
@@ -1205,6 +1209,22 @@ async def get_all_doc_view_history():
         history = cursor.fetchall()
         db.close()
         return {"status": "success", "data": history}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.get("/get-grammar-doc/{doc_id}")
+async def get_grammar_doc(doc_id: int):
+    try:
+        db = get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM tai_lieu_hoc WHERE id = %s", (doc_id,))
+        doc = cursor.fetchone()
+        db.close()
+        
+        if doc:
+            return {"status": "success", "data": doc}
+        else:
+            return {"status": "error", "message": "Không tìm thấy tài liệu!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

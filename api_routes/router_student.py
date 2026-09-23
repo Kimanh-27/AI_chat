@@ -62,7 +62,11 @@ async def get_homework_detail(id_bai_tap: int):
             
         format_strings = ','.join(['%s'] * len(ids))
         
-        cursor.execute(f"SELECT * FROM ngan_hang_cau_hoi WHERE id IN ({format_strings})", tuple(ids))
+        order_clause = f"ORDER BY FIELD(id, {format_strings})"
+        
+        query = f"SELECT * FROM ngan_hang_cau_hoi WHERE id IN ({format_strings}) {order_clause}"
+        
+        cursor.execute(query, tuple(ids) + tuple(ids))
         questions = cursor.fetchall()
         
         conn.close()
